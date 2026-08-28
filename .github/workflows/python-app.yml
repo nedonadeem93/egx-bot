@@ -2,8 +2,8 @@ name: Run EGX Bot
 
 on:
   schedule:
-    - cron: '0 * * * *'  # بيشتغل تلقائياً كل ساعة
-  workflow_dispatch:      # بيخليك تقدر تشغله بايدك في أي وقت
+    - cron: '0 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -21,7 +21,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip install pandas pandas-ta yfinance requests schedule
 
     - name: Run bot
       run: |
