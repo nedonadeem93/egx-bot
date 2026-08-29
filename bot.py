@@ -11,7 +11,6 @@ def send_telegram_message(message):
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message
-        # شيلنا الـ parse_mode عشان مايحصلش أي خطأ بسبب الرموز الخاصة
     }
     try:
         response = requests.post(url, json=payload)
@@ -30,7 +29,7 @@ def calculate_rsi(series, period=14):
 
 def run_egx_scan():
     print("Starting EGX scan...")
-    stocks = ["COMI.CA", "CIEB.CA", "ABUK.CA", "MFPC.CA", "EDIT.CA", "FWRY.CA", "TMGH.CA"]
+    stocks = ["COMI.CA", "CIEB.CA", "ABUK.CA", "MFPC.CA", "FWRY.CA", "TMGH.CA"]
     
     results_message = "تقرير فحص البورصة المصرية (EGX)\n\n"
     success_count = 0
