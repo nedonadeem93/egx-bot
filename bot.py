@@ -2,7 +2,6 @@ import pandas as pd
 import yfinance as yf
 import requests
 
-# --------- بيانات بوت تليجرام ---------
 TELEGRAM_TOKEN = "8864121301:AAH1phUuns-xr0YZ1z4gQI7Jm6oGXxUIFc"
 TELEGRAM_CHAT_ID = "1232173822"
 
@@ -79,5 +78,3 @@ def run_egx_scan():
 
 if __name__ == "__main__":
     run_egx_scan()
-
-
