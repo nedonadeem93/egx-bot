@@ -3,9 +3,8 @@ import yfinance as yf
 import requests
 
 # --------- بيانات بوت تليجرام ---------
-"TELEGRAM_TOKEN = "8864121301:AAH1phUuns-xr0YZ1z4gQI7Jm6oGXxUIFc"
+TELEGRAM_TOKEN = "8864121301:AAH1phUuns-xr0YZ1z4gQI7Jm6oGXxUIFc"
 TELEGRAM_CHAT_ID = "1232173822"
-
 
 def send_telegram_message(message):
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
