@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 
 # --------- بيانات بوت تليجرام ---------
-TELEGRAM_TOKEN = "8864121301:AAH1phUuns-xr0YZ1z4g"
+TELEGRAM_TOKEN = "8864121301:AAH1phUuns-xrOYZ1z4gjQI7Jm6oGXxUIFc"
 TELEGRAM_CHAT_ID = "1232173822"
 
 def send_telegram_message(message):
@@ -38,7 +38,7 @@ def run_egx_scan():
             if data.empty or len(data) < 15:
                 continue
                 
-            # حساب المؤشرات ببساطة بدون الحاجة لـ pandas_ta المعقدة
+            # حساب المؤشرات ببساطة
             close_prices = data['Close']
             if isinstance(close_prices, pd.DataFrame):
                 close_prices = close_prices.iloc[:, 0]
