@@ -2,4 +2,3 @@ pandas
 pandas-ta
 yfinance
 requests
-schedule
