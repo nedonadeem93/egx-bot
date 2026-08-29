@@ -27,7 +27,7 @@ def market_trend():
     try:
         df = yf.download("^EGX30", period="3mo", interval="1d", progress=False)
         if df.empty:
-            return "محايد"
+            return "محايد 🟡"
         
         # تنظيف الأعمدة
         if isinstance(df.columns, pd.MultiIndex):
@@ -72,9 +72,8 @@ def analyze_stock(ticker, name):
         df['CMF'] = ta.cmf(df['High'], df['Low'], df['Close'], df['Volume'], length=20)
         df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
         
-        # ====== مؤشر القوة النسبية للسهم (Performance) ======
+        # ====== مؤشر القوة النسبية للسهم ======
         df['Stock_Performance'] = (df['Close'] / df['Close'].shift(20) - 1) * 100
-        df['Market_Performance'] = 0  # هتتحسب من EGX30
         
         last = df.iloc[-1]
         
@@ -99,8 +98,7 @@ def analyze_stock(ticker, name):
         volume_ok = last['Volume'] > avg_volume * 0.7
         
         # 5. السهم أقوى من السوق
-        market_trend_value = market_trend()
-        stock_strong = last['Stock_Performance'] > 0  # أداء إيجابي آخر 20 يوم
+        stock_strong = last['Stock_Performance'] > 0
         
         # ====== المعلومات الأساسية ======
         info = stock.info
@@ -131,7 +129,7 @@ def analyze_stock(ticker, name):
                 'atr': atr_value,
                 'volume_ratio': round(last['Volume'] / avg_volume, 1),
                 'performance': round(last['Stock_Performance'], 1),
-                'market_trend': market_trend_value,
+                'market_trend': market_trend(),
                 'is_risky': is_risky,
                 'eps': eps,
                 'pe': pe
