@@ -6,28 +6,28 @@ import pandas_ta as ta
 import yfinance as yf
 import requests
 
-# ---------------- ط¥ط¹ط¯ط§ط¯ ط§ظ„ظ„ظˆط¬ (ط¹ط´ط§ظ† ظ†ط´ظˆظپ ط§ظ„ط£ط®ط·ط§ط، ط¨ط¯ظ„ ظ…ط§ طھطھط¨ظ„ط¹ ط¨طµظ…طھ) ----------------
+# ---------------- إعداد اللوج (عشان نشوف الأخطاء بدل ما تتبلع بصمت) ----------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s"
 )
 log = logging.getLogger(__name__)
 
-# ---------------- ط¨ظٹط§ظ†ط§طھ ط¨ظˆطھ طھظ„ظٹط¬ط±ط§ظ… (ظ…ظ† environment variablesطŒ ظ…ط´ ظ…ظƒطھظˆط¨ط© ظپظٹ ط§ظ„ظƒظˆط¯) ----------------
+# ---------------- بيانات بوت تليجرام (من environment variables، مش مكتوبة في الكود) ----------------
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
     raise SystemExit(
-        "â‌Œ ظ„ط§ط²ظ… طھط­ط· TELEGRAM_TOKEN ظˆ TELEGRAM_CHAT_ID ظƒظ€ environment variables "
-        "(ط£ظˆ GitHub Secrets ظ„ظˆ ط´ط؛ط§ظ„ ط¹ظ„ظ‰ Actions) ظ‚ط¨ظ„ ظ…ط§ طھط´ط؛ظ„ ط§ظ„ط¨ظˆطھ."
+        "❌ لازم تحط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID كـ environment variables "
+        "(أو GitHub Secrets لو شغال على Actions) قبل ما تشغل البوت."
     )
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
 
 
 def send_telegram_message(message: str) -> None:
-    """ظٹط¨ط¹طھ ط±ط³ط§ظ„ط© ط¹ظ„ظ‰ طھظ„ظٹط¬ط±ط§ظ…طŒ ظ…ط¹ ط¥ط¹ط§ط¯ط© ظ…ط­ط§ظˆظ„ط© ط¨ط³ظٹط·ط© ظ„ظˆ ظپط´ظ„ ط§ظ„ط§طھطµط§ظ„."""
+    """يبعت رسالة على تليجرام، مع إعادة محاولة بسيطة لو فشل الاتصال."""
     payload = {
         "chat_id": TELEGRAM_CHAT_ID,
         "text": message,
@@ -45,14 +45,14 @@ def send_telegram_message(message: str) -> None:
     log.error("Failed to send Telegram message after 3 attempts.")
 
 
-# ---------------- 1. ظپط­طµ ط§ظ„ط§طھط¬ط§ظ‡ ط§ظ„ط¹ط§ظ… ظ„ظ„ظ…ط¤ط´ط±ط§طھ ----------------
+# ---------------- 1. فحص الاتجاه العام للمؤشرات ----------------
 indices = {
-    "^EGX30": "ظ…ط¤ط´ط± EGX 30",
-    "^EGX70": "ظ…ط¤ط´ط± EGX 70 EWI",
-    "^EGX100": "ظ…ط¤ط´ط± EGX 100 EWI",
+    "^EGX30": "مؤشر EGX 30",
+    "^EGX70": "مؤشر EGX 70 EWI",
+    "^EGX100": "مؤشر EGX 100 EWI",
 }
 
-index_status_lines = ["ًں“ٹ *طھظ‚ط±ظٹط± ط­ط§ظ„ط© ط§ظ„ظ…ط¤ط´ط±ط§طھ ط§ظ„ط±ط¦ظٹط³ظٹط© (EGX):*"]
+index_status_lines = ["📊 *تقرير حالة المؤشرات الرئيسية (EGX):*"]
 
 for idx_symbol, idx_name in indices.items():
     try:
@@ -72,15 +72,15 @@ for idx_symbol, idx_name in indices.items():
             log.warning("NaN values for index %s, skipping.", idx_symbol)
             continue
 
-        status = "ًںں¢ طµط§ط¹ط¯ (ط£ط¹ظ„ظ‰ ظ…ظ† EMA 50)" if last_close > last_ema50 else "ًں”´ طھطµط­ظٹط­ظٹ/ظ‡ط§ط¨ط· (ط£ط¯ظ†ظ‰ ظ…ظ† EMA 50)"
-        index_status_lines.append(f"â€¢ *{idx_name}:* {status}")
+        status = "🟢 صاعد (أعلى من EMA 50)" if last_close > last_ema50 else "🔴 تصحيحي/هابط (أدنى من EMA 50)"
+        index_status_lines.append(f"• *{idx_name}:* {status}")
     except Exception as e:
         log.error("Error processing index %s: %s", idx_symbol, e)
         continue
 
 send_telegram_message("\n".join(index_status_lines))
 
-# ---------------- 2. ظ‚ط§ط¦ظ…ط© ط§ظ„ط£ط³ظ‡ظ… ----------------
+# ---------------- 2. قائمة الأسهم ----------------
 watchlist = [
     "COMI.CA", "FWRY.CA", "HRHO.CA", "CIEB.CA", "ADIB.CA", "TMGH.CA", "HELI.CA",
     "PHDC.CA", "ORAS.CA", "MNHD.CA", "EMFD.CA", "MFPC.CA", "ABUK.CA", "ESRS.CA",
@@ -92,22 +92,22 @@ watchlist = [
 ]
 
 names_map = {
-    "COMI.CA": "ط§ظ„ط¨ظ†ظƒ ط§ظ„طھط¬ط§ط±ظٹ ط§ظ„ط¯ظˆظ„ظٹ", "FWRY.CA": "ظپظˆط±ظٹ", "HRHO.CA": "ظ‡ظٹط±ظ…ظٹط³",
-    "CIEB.CA": "ظƒط±ظٹط¯ظٹ ط£ط¬ط±ظٹظƒظˆظ„", "EGBE.CA": "ط§ظ„ظ…طµط±ظٹ ظ„ظ„ظپظٹط´ط©", "ADIB.CA": "ظ…طµط±ظپ ط£ط¨ظˆط¸ط¨ظٹ ط§ظ„ط¥ط³ظ„ط§ظ…ظٹ",
-    "CANA.CA": "ط¨ظ†ظƒ ظ‚ظ†ط§ط© ط§ظ„ط³ظˆظٹط³", "TMGH.CA": "ط·ظ„ط¹طھ ظ…طµط·ظپظ‰", "HELI.CA": "ظ…طµط± ظ„ظ„ط¬ط¯ظٹط¯ط© ظ„ظ„ط¥ط³ظƒط§ظ†",
-    "PHDC.CA": "ط¨ط§ظ„ظ… ظ‡ظٹظ„ط²", "ORAS.CA": "ط£ظˆط±ط§ط³ظƒظˆظ… ظ„ظ„ط¥ظ†ط´ط§ط،", "MNHD.CA": "ظ…ط¯ظٹظ†ط© ظ…طµط±",
-    "EMFD.CA": "ط¥ط¹ظ…ط§ط± ظ…طµط±", "CCRS.CA": "ط³ظٹط¯ظٹ ظƒط±ظٹط±", "MFPC.CA": "ظ…ظˆط¨ظƒظˆ",
-    "ABUK.CA": "ط£ط¨ظˆ ظ‚ظٹط± ظ„ظ„ط£ط³ظ…ط¯ط©", "KIMA.CA": "ظƒظٹظ…ط§", "SKPC.CA": "ط³ظٹط¯ظٹ ظƒط±ظٹط± ظ„ظ„ط¨ظٹطھط±ظˆظƒظٹظ…ط§ظˆظٹط§طھ",
-    "ESRS.CA": "ط¹ط² ط­ط¯ظٹط¯", "AMOC.CA": "ط£ظ…ظˆظƒ", "EDIT.CA": "ط¥ظٹط¯ظٹطھط§",
-    "JUFO.CA": "ط¬ظ‡ظٹظ†ط©", "DOMT.CA": "ط¯ظˆظ…طھظٹ", "EAST.CA": "ط§ظ„ط´ط±ظ‚ظٹط© ظ„ظ„ط¯ط®ط§ظ†",
-    "ORWE.CA": "ط§ظ„ظ†ط³ط§ط¬ظˆظ† ط§ظ„ط´ط±ظ‚ظٹظˆظ†", "ISPH.CA": "ط§ط¨ظ† ط³ظٹظ†ط§ ظپط§ط±ظ…ط§", "CLHO.CA": "ظƒظ„ظٹظˆط¨ط§طھط±ط§",
-    "RMDA.CA": "ط±ط§ظ…ط¯ط§", "PHAR.CA": "ط£ظٹط¨ظƒط³ ظپط§ط±ظ…ط§", "ETEL.CA": "ط§ظ„ظ…طµط±ظٹط© ظ„ظ„ط§طھطµط§ظ„ط§طھ",
-    "RAYA.CA": "ط±ط§ظٹط©", "RTVC.CA": "ط±ظ…ظƒظˆ", "EKHO.CA": "ط§ظ„ظ‚ط§ط¨ط¶ط© ط§ظ„ظ…طµط±ظٹط© ط§ظ„ظƒظˆظٹطھظٹط©",
-    "SWDY.CA": "ط§ظ„ط³ظˆظٹط¯ظٹ ط¥ظ„ظٹظƒطھط±ظٹظƒ", "GBCO.CA": "ط¬ظٹ ط¨ظٹ ظƒظˆط±ط¨", "DSCW.CA": "ط¯ط§ظٹط³ ظ„ظ„ظ…ظ„ط§ط¨ط³",
-    "OIH.CA": "ط£ظˆط±ط§ط³ظƒظˆظ… ظ„ظ„ط§ط³طھط«ظ…ط§ط±", "ACGC.CA": "ط§ظ„ط¹ط±ط¨ظٹط© ظ„ط­ط¬ظٹط¬ ط§ظ„ظ‚ط·ظ†", "EGAL.CA": "ظ…طµط± ظ„ظ„ط£ظ„ظˆظ…ظ†ظٹظˆظ…",
-    "ALCN.CA": "ط§ظ„ط¥ط³ظƒظ†ط¯ط±ظٹط© ظ„طھط¯ط§ظˆظ„ ط§ظ„ط¨ط¶ط§ط¦ط¹", "ATQA.CA": "ظ…طµط± ط§ظ„ظˆط·ظ†ظٹط© ظ„ظ„طµظ„ط¨ - ط¹طھط§ظ‚ط©",
-    "UNIT.CA": "ط§ظ„ظ…طھط­ط¯ط© ظ„ظ„ط¥ط³ظƒط§ظ†", "MPRC.CA": "ط¥ظ… ط¥ظ… ط¬ط±ظˆط¨", "DCHE.CA": "ط§ظ„ط³ظ…ط§ط¯ ظˆط§ظ„طµظ†ط§ط¹ط§طھ ط§ظ„ظƒظٹظ…ط§ظˆظٹط©",
-    "ASCM.CA": "ط£ط³ظƒظˆظ…", "UEGC.CA": "ط§ظ„ط³ط¨ط§ط¹ظٹط© ظ„ظ„طµظ†ط§ط¹ط§طھ", "BLCY.CA": "ط¨ظ„طھظˆظ† ط§ظ„ظ‚ط§ط¨ط¶ط©",
+    "COMI.CA": "البنك التجاري الدولي", "FWRY.CA": "فوري", "HRHO.CA": "هيرميس",
+    "CIEB.CA": "كريدي أجريكول", "EGBE.CA": "المصري للفيشة", "ADIB.CA": "مصرف أبوظبي الإسلامي",
+    "CANA.CA": "بنك قناة السويس", "TMGH.CA": "طلعت مصطفى", "HELI.CA": "مصر للجديدة للإسكان",
+    "PHDC.CA": "بالم هيلز", "ORAS.CA": "أوراسكوم للإنشاء", "MNHD.CA": "مدينة مصر",
+    "EMFD.CA": "إعمار مصر", "CCRS.CA": "سيدي كرير", "MFPC.CA": "موبكو",
+    "ABUK.CA": "أبو قير للأسمدة", "KIMA.CA": "كيما", "SKPC.CA": "سيدي كرير للبيتروكيماويات",
+    "ESRS.CA": "عز حديد", "AMOC.CA": "أموك", "EDIT.CA": "إيديتا",
+    "JUFO.CA": "جهينة", "DOMT.CA": "دومتي", "EAST.CA": "الشرقية للدخان",
+    "ORWE.CA": "النساجون الشرقيون", "ISPH.CA": "ابن سينا فارما", "CLHO.CA": "كليوباترا",
+    "RMDA.CA": "رامدا", "PHAR.CA": "أيبكس فارما", "ETEL.CA": "المصرية للاتصالات",
+    "RAYA.CA": "راية", "RTVC.CA": "رمكو", "EKHO.CA": "القابضة المصرية الكويتية",
+    "SWDY.CA": "السويدي إليكتريك", "GBCO.CA": "جي بي كورب", "DSCW.CA": "دايس للملابس",
+    "OIH.CA": "أوراسكوم للاستثمار", "ACGC.CA": "العربية لحجيج القطن", "EGAL.CA": "مصر للألومنيوم",
+    "ALCN.CA": "الإسكندرية لتداول البضائع", "ATQA.CA": "مصر الوطنية للصلب - عتاقة",
+    "UNIT.CA": "المتحدة للإسكان", "MPRC.CA": "إم إم جروب", "DCHE.CA": "السماد والصناعات الكيماوية",
+    "ASCM.CA": "أسكوم", "UEGC.CA": "السباعية للصناعات", "BLCY.CA": "بلتون القابضة",
 }
 
 log.info("--- Running Full EGX 30 / 70 / 100 Scanner ---")
@@ -122,7 +122,7 @@ for ticker in watchlist:
             log.info("Skipping %s: not enough historical data.", ticker)
             continue
 
-        # 1. ط§ظ„ظ…ط¤ط´ط±ط§طھ ط§ظ„ظپظ†ظٹط©
+        # 1. المؤشرات الفنية
         df["EMA_20"] = ta.ema(df["Close"], length=20)
         df["EMA_50"] = ta.ema(df["Close"], length=50)
         df["RSI"] = ta.rsi(df["Close"], length=14)
@@ -131,13 +131,13 @@ for ticker in watchlist:
 
         last = df.iloc[-1]
 
-        # طھط£ظƒظٹط¯ ط¥ظ† ط§ظ„ظ…ط¤ط´ط±ط§طھ ظ…ط§ظ„ظ‡ط§ط´ ظ‚ظٹظ… ظ†ط§ظ‚طµط© ظ‚ط¨ظ„ ظ…ط§ ظ†ظƒظ…ظ„
+        # تأكيد إن المؤشرات مالهاش قيم ناقصة قبل ما نكمل
         required_fields = ["EMA_20", "EMA_50", "RSI", "CMF", "ATR", "Close"]
         if last[required_fields].isna().any():
             log.info("Skipping %s: NaN values in indicators.", ticker)
             continue
 
-        # 2. ظپط­طµ ط§ظ„طھظ‚ط§ط·ط¹ ط§ظ„ط£ط³ط¨ظˆط¹ظٹ (ط¢ط®ط± 5 ط¬ظ„ط³ط§طھ طھط¯ط§ظˆظ„)
+        # 2. فحص التقاطع الأسبوعي (آخر 5 جلسات تداول)
         recent_df = df.tail(6)
         has_weekly_crossover = False
         for i in range(1, len(recent_df)):
@@ -149,7 +149,7 @@ for ticker in watchlist:
                 has_weekly_crossover = True
                 break
 
-        # 3. ط§ظ„ط´ط±ط· ط§ظ„ظپظ†ظٹ ط§ظ„ظ…ظƒطھظ…ظ„
+        # 3. الشرط الفني المكتمل
         cond_tech = has_weekly_crossover and (last["RSI"] > 50) and (last["CMF"] > 0)
 
         if not cond_tech:
@@ -163,7 +163,7 @@ for ticker in watchlist:
         take_profit = round(entry_price + (3.0 * atr_value), 2)
         arabic_name = names_map.get(ticker, ticker)
 
-        # 4. ظپط­طµ ط§ظ„ظ…ط§ظ„ظٹط© ظˆطھط­ط¯ظٹط¯ ط¯ط±ط¬ط© ط§ظ„ط®ط·ظˆط±ط©
+        # 4. فحص المالية وتحديد درجة الخطورة
         try:
             info = stock.info
         except Exception as e:
@@ -175,33 +175,33 @@ for ticker in watchlist:
 
         is_high_risk = not isinstance(eps, (int, float)) or eps <= 0
 
-        pe_text = str(round(pe_ratio, 2)) if isinstance(pe_ratio, (int, float)) else "ط؛ظٹط± ظ…طھط§ط­"
-        eps_text = str(round(eps, 2)) if isinstance(eps, (int, float)) else "ط؛ظٹط± ظ…طھط§ط­"
+        pe_text = str(round(pe_ratio, 2)) if isinstance(pe_ratio, (int, float)) else "غير متاح"
+        eps_text = str(round(eps, 2)) if isinstance(eps, (int, float)) else "غير متاح"
 
-        # 5. طµظٹط§ط؛ط© ط§ظ„طھظ†ط¨ظٹظ‡ ط­ط³ط¨ ظ†ظˆط¹ ط§ظ„طµظپظ‚ط©
+        # 5. صياغة التنبيه حسب نوع الصفقة
         if is_high_risk:
             lines = [
-                "âڑ ï¸ڈ *ط¥ط´ط§ط±ط© ظ…ط¶ط§ط±ط¨ط© ط³ط±ظٹط¹ط© (ط¹ط§ظ„ظٹط© ط§ظ„ط®ط·ظˆط±ط©)* âڑ،",
-                f"ًں“ˆ *ط§ظ„ط³ظ‡ظ…:* {arabic_name} (`{ticker}`)",
+                "⚠️ *إشارة مضاربة سريعة (عالية الخطورة)* ⚡",
+                f"📈 *السهم:* {arabic_name} (`{ticker}`)",
                 "----------------------------------",
-                f"ًں“Œ *ط³ط¹ط± ط§ظ„ط¥ط؛ظ„ط§ظ‚:* {entry_price} ط¬ظ†ظٹظ‡",
-                f"ًںژ¯ *ط§ظ„ظ‡ط¯ظپ ط§ظ„ظ…ظ‚طھط±ط­:* {take_profit} ط¬ظ†ظٹظ‡",
-                f"ًں›‘ *ظˆظ‚ظپ ط§ظ„ط®ط³ط§ط±ط© (ط§ظ„ط§ظ„طھط²ط§ظ… طµط§ط±ظ…):* {stop_loss} ط¬ظ†ظٹظ‡",
+                f"📌 *سعر الإغلاق:* {entry_price} جنيه",
+                f"🎯 *الهدف المقترح:* {take_profit} جنيه",
+                f"🛑 *وقف الخسارة (الالتزام صارم):* {stop_loss} جنيه",
                 "----------------------------------",
-                f"ًں”´ *ط³ط¨ط¨ طھظ†ط¨ظٹظ‡ ط§ظ„ط®ط·ظˆط±ط©:* ط§ظ„ظ†طھط§ط¦ط¬ ط§ظ„ظ…ط§ظ„ظٹط© ط¶ط¹ظٹظپط© ط£ظˆ ط؛ظٹط± ظ…طھط§ط­ط© (EPS: {eps_text})",
-                "ًں’، *طھظˆطµظٹط© ط§ظ„ظ…ط¶ط§ط±ط¨ط©:* ط§ط­ط±طµ ط¹ظ„ظ‰ ط§ظ„طھط¯ط§ظˆظ„ ط¨ط­ط¬ظ… ظƒظ…ظٹط© طµط؛ظٹط± ظˆط§ظ„طھط²ط§ظ… طھط§ظ… ط¨ظˆظ‚ظپ ط§ظ„ط®ط³ط§ط±ط©.",
+                f"🔴 *سبب تنبيه الخطورة:* النتائج المالية ضعيفة أو غير متاحة (EPS: {eps_text})",
+                "💡 *توصية المضاربة:* احرص على التداول بحجم كمية صغير والتزام تام بوقف الخسارة.",
             ]
         else:
             lines = [
-                "ًںڑ€ *ط¥ط´ط§ط±ط© ط§ط³طھط«ظ…ط§ط±ظٹط© / ط§طھط¬ط§ظ‡ ظ…ط¤ظƒط¯ (ظ…ط®ط§ط·ط±ط© ظ…طھظˆط§ط²ظ†ط©)* ًں”¥",
-                f"ًں“ˆ *ط§ظ„ط³ظ‡ظ…:* {arabic_name} (`{ticker}`)",
+                "🚀 *إشارة استثمارية / اتجاه مؤكد (مخاطرة متوازنة)* 🔥",
+                f"📈 *السهم:* {arabic_name} (`{ticker}`)",
                 "----------------------------------",
-                f"ًں“Œ *ط³ط¹ط± ط§ظ„ط¥ط؛ظ„ط§ظ‚:* {entry_price} ط¬ظ†ظٹظ‡",
-                f"ًںژ¯ *ط§ظ„ظ‡ط¯ظپ ط§ظ„ظ…ظ‚طھط±ط­:* {take_profit} ط¬ظ†ظٹظ‡",
-                f"ًں›‘ *ظˆظ‚ظپ ط§ظ„ط®ط³ط§ط±ط©:* {stop_loss} ط¬ظ†ظٹظ‡",
+                f"📌 *سعر الإغلاق:* {entry_price} جنيه",
+                f"🎯 *الهدف المقترح:* {take_profit} جنيه",
+                f"🛑 *وقف الخسارة:* {stop_loss} جنيه",
                 "----------------------------------",
-                f"ًںڈ›ï¸ڈ *ط§ظ„طھط­ظ„ظٹظ„ ط§ظ„ط£ط³ط§ط³ظٹ:* EPS: {eps_text} | P/E: {pe_text}",
-                f"ًں“ٹ *ط§ظ„طھط­ظ„ظٹظ„ ط§ظ„ظپظ†ظٹ:* RSI: {round(last['RSI'], 1)} | ط§ظ„ط³ظٹظˆظ„ط© (CMF) ط¥ظٹط¬ط§ط¨ظٹط©",
+                f"🏛️ *التحليل الأساسي:* EPS: {eps_text} | P/E: {pe_text}",
+                f"📊 *التحليل الفني:* RSI: {round(last['RSI'], 1)} | السيولة (CMF) إيجابية",
             ]
 
         msg = "\n".join(lines)
@@ -212,12 +212,12 @@ for ticker in watchlist:
         log.error("Error processing %s: %s", ticker, e)
         continue
 
-    # ظ…ظ‡ظ„ط© ط¨ط³ظٹط·ط© ط¨ظٹظ† ظƒظ„ ط³ظ‡ظ… ظˆط§ظ„طھط§ظ†ظٹ ط¹ط´ط§ظ† ظ†ظ‚ظ„ظ„ ط§ط­طھظ…ط§ظ„ rate limiting ظ…ظ† Yahoo Finance
+    # مهلة بسيطة بين كل سهم والتاني عشان نقلل احتمال rate limiting من Yahoo Finance
     time.sleep(1)
 
 if signals_found == 0:
     send_telegram_message(
-        "âœ… *طھظ‚ط±ظٹط± ط§ظ„ظپط­طµ ط§ظ„ط£ط³ط¨ظˆط¹ظٹ:* ظ„ظ… طھظڈظƒطھط´ظپ ط£ظٹ ط¥ط´ط§ط±ط§طھ ط¯ط®ظˆظ„ ط¬ط¯ظٹط¯ط© (ط§ط³طھط«ظ…ط§ط±ظٹط© ط£ظˆ ظ…ط¶ط§ط±ط¨ط©) طھظ†ط·ط¨ظ‚ ط¹ظ„ظٹظ‡ط§ ط§ظ„ط´ط±ظˆط·."
+        "✅ *تقرير الفحص الأسبوعي:* لم تُكتشف أي إشارات دخول جديدة (استثمارية أو مضاربة) تنطبق عليها الشروط."
     )
 
 log.info("EGX Scan Complete. Total Signals: %s", signals_found)
