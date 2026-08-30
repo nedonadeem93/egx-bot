@@ -134,69 +134,27 @@ def market_trend():
     except:
         return "محايد 🟡"
 
-# ==================== حساب الدعم والمقاومة المتقدم ====================
-def calculate_support_resistance_advanced(df, lookback=50, window=5):
-    """حساب الدعم والمقاومة بطريقة احترافية"""
-    high = df['High'].tail(lookback)
-    low = df['Low'].tail(lookback)
-    close = df['Close'].tail(lookback)
-    current_price = close.iloc[-1]
+# ==================== حساب الدعم والمقاومة البسيط ====================
+def calculate_support_resistance_simple(df, lookback=30):
+    """حساب الدعم والمقاومة بطريقة بسيطة ودقيقة"""
+    last = df.iloc[-1]
+    current_price = last['Close']
     
-    peaks = []
-    troughs = []
+    high_30 = df['High'].tail(lookback)
+    low_30 = df['Low'].tail(lookback)
     
-    for i in range(window, len(high) - window):
-        if high.iloc[i] == high.iloc[i-window:i+window+1].max():
-            peaks.append(high.iloc[i])
-        if low.iloc[i] == low.iloc[i-window:i+window+1].min():
-            troughs.append(low.iloc[i])
-    
-    resistances = [p for p in peaks if p > current_price]
-    resistance = min(resistances) if resistances else high.max()
-    
-    supports = [t for t in troughs if t < current_price]
-    support = max(supports) if supports else low.min()
-    
-    avg_resistance = sum(peaks[-3:]) / 3 if len(peaks) >= 3 else high.mean()
-    avg_support = sum(troughs[-3:]) / 3 if len(troughs) >= 3 else low.mean()
-    
-    highest_50 = high.max()
-    lowest_50 = low.min()
-    range_50 = highest_50 - lowest_50
-    
-    fib_levels = {
-        '0.0': lowest_50,
-        '0.236': lowest_50 + 0.236 * range_50,
-        '0.382': lowest_50 + 0.382 * range_50,
-        '0.5': lowest_50 + 0.5 * range_50,
-        '0.618': lowest_50 + 0.618 * range_50,
-        '0.786': lowest_50 + 0.786 * range_50,
-        '1.0': highest_50
-    }
-    
-    closest_fib = None
-    closest_fib_level = None
-    for level, price in fib_levels.items():
-        if closest_fib is None or abs(price - current_price) < abs(closest_fib - current_price):
-            closest_fib = price
-            closest_fib_level = level
+    resistance = high_30.max()
+    support = low_30.min()
     
     return {
         'support': round(support, 2),
         'resistance': round(resistance, 2),
-        'avg_support': round(avg_support, 2),
-        'avg_resistance': round(avg_resistance, 2),
-        'highest_50': round(highest_50, 2),
-        'lowest_50': round(lowest_50, 2),
-        'fib_levels': {k: round(v, 2) for k, v in fib_levels.items()},
-        'closest_fib': round(closest_fib, 2),
-        'closest_fib_level': closest_fib_level,
-        'current_price': current_price
+        'current_price': round(current_price, 2)
     }
 
 # ==================== تحليل السهم ====================
 def analyze_stock(ticker, name):
-    """تحليل سهم واحد مع دعم ومقاومة متقدم"""
+    """تحليل سهم واحد مع دعم ومقاومة"""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period="6mo", interval="1d")
@@ -207,6 +165,7 @@ def analyze_stock(ticker, name):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
+        # ====== المؤشرات الفنية ======
         df['EMA_20'] = ta.ema(df['Close'], length=20)
         df['EMA_50'] = ta.ema(df['Close'], length=50)
         df['RSI'] = ta.rsi(df['Close'], length=14)
@@ -219,42 +178,50 @@ def analyze_stock(ticker, name):
         
         last = df.iloc[-1]
         
-        sr = calculate_support_resistance_advanced(df)
+        # ====== حساب الدعم والمقاومة ======
+        sr = calculate_support_resistance_simple(df)
+        current_price = sr['current_price']
+        support = sr['support']
+        resistance = sr['resistance']
         
-        # حساب سعر الدخول
-        if last['Close'] > sr['resistance'] * 0.98:
-            entry_price = round(sr['resistance'] * 1.005, 2)
-            entry_strategy = "اختراق المقاومة"
-        elif last['Close'] < sr['support'] * 1.02:
-            entry_price = round(sr['support'] * 1.01, 2)
-            entry_strategy = "الارتداد من الدعم"
+        # ====== سعر الدخول المثالي ======
+        # استخدام السعر الحالي + 0.5% (دخول واقعي)
+        entry_price = round(current_price * 1.005, 2)
+        entry_strategy = "السعر الحالي + 0.5%"
+        
+        # ====== وقف الخسارة ======
+        # 3% تحت الدعم
+        stop_loss = round(support * 0.97, 2)
+        
+        # ====== هدف الربح ======
+        if resistance > current_price:
+            take_profit_1 = round(resistance * 0.995, 2)
         else:
-            entry_price = round(sr['closest_fib'] * 1.002, 2)
-            entry_strategy = f"مستوى فيبوناتشي {sr['closest_fib_level']}"
+            take_profit_1 = round(current_price * 1.05, 2)  # 5% ربح
         
-        stop_loss = round(min(sr['support'] * 0.98, last['Close'] - (1.5 * last['ATR'])), 2)
-        take_profit_1 = round(sr['resistance'] * 0.995, 2) if sr['resistance'] > last['Close'] else round(last['Close'] + (2.5 * last['ATR']), 2)
         take_profit_2 = round(take_profit_1 * 1.02, 2)
         
+        # ====== نسبة المخاطرة/المكافأة ======
         risk = entry_price - stop_loss
         reward = take_profit_1 - entry_price
         risk_reward = round(reward / risk, 2) if risk > 0 else 0
         
-        # شروط الشراء
+        # ====== شروط الدخول (شراء) ======
         buy_conditions = {
             'ema_crossover': last['EMA_20'] > last['EMA_50'],
             'rsi_ok': 45 < last['RSI'] < 70,
             'cmf_ok': last['CMF'] > 0,
             'volume_ok': last['Volume'] > last['Volume_MA'] * 0.7,
             'above_ema50': last['Close'] > last['EMA_50'],
-            'near_support': last['Close'] < sr['support'] * 1.05
+            'near_support': current_price < support * 1.05
         }
         
         is_buy = all(buy_conditions.values())
         
-        # شروط البيع
-        is_sell = (last['Close'] < sr['support'] or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
+        # ====== شروط الخروج (بيع) ======
+        is_sell = (last['Close'] < support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
         
+        # ====== تحديد الإشارة ======
         signal = "انتظار ⏳"
         signal_type = "none"
         reasons = []
@@ -265,17 +232,18 @@ def analyze_stock(ticker, name):
             reasons = [
                 f"تقاطع EMA 20 فوق 50 ({round(last['EMA_20'], 2)} > {round(last['EMA_50'], 2)})",
                 f"RSI {round(last['RSI'], 1)} (زخم إيجابي)",
-                f"دعم عند {sr['support']} | فيبوناتشي {sr['closest_fib_level']} عند {sr['closest_fib']}",
+                f"دعم عند {support}",
                 f"حجم التداول {round(last['Volume'] / last['Volume_MA'], 1)}x المتوسط"
             ]
         elif is_sell:
             signal = "⚠️ بيع/خروج"
             signal_type = "sell"
             reasons = [
-                f"كسر الدعم {sr['support']}" if last['Close'] < sr['support'] else f"RSI {round(last['RSI'], 1)} (تشبع)",
+                f"كسر الدعم {support}" if last['Close'] < support else f"RSI {round(last['RSI'], 1)} (تشبع)",
                 "CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50"
             ]
         
+        # ====== المعلومات الأساسية ======
         info = stock.info
         eps = info.get('trailingEps', 'غير متاح')
         pe = info.get('trailingPE', 'غير متاح')
@@ -283,7 +251,7 @@ def analyze_stock(ticker, name):
         return {
             'ticker': ticker,
             'name': name,
-            'price': round(last['Close'], 2),
+            'price': round(current_price, 2),
             'ema_20': round(last['EMA_20'], 2),
             'ema_50': round(last['EMA_50'], 2),
             'rsi': round(last['RSI'], 1),
@@ -293,14 +261,8 @@ def analyze_stock(ticker, name):
             'change_1d': round(last['Price_Change_1d'], 2),
             'change_5d': round(last['Price_Change_5d'], 2),
             'change_20d': round(last['Price_Change_20d'], 2),
-            'support': sr['support'],
-            'resistance': sr['resistance'],
-            'avg_support': sr['avg_support'],
-            'avg_resistance': sr['avg_resistance'],
-            'highest_50': sr['highest_50'],
-            'lowest_50': sr['lowest_50'],
-            'closest_fib': sr['closest_fib'],
-            'closest_fib_level': sr['closest_fib_level'],
+            'support': support,
+            'resistance': resistance,
             'entry_price': entry_price,
             'entry_strategy': entry_strategy,
             'stop_loss': stop_loss,
@@ -344,7 +306,7 @@ def morning_report(top_liquid, all_results, trend):
             if stock_result:
                 trend_emoji = "📈" if stock_result['above_ema50'] else "📉"
                 lines.append(f"{i}. {trend_emoji} *{name}* (`{ticker}`)")
-                lines.append(f"   💰 {stock_result['price']} جنيه")
+                lines.append(f"   💰 السعر: {stock_result['price']} جنيه")
                 lines.append(f"   📊 RSI: {stock_result['rsi']} | CMF: {stock_result['cmf']}")
                 lines.append(f"   📈 حجم: {stock_result['volume_ratio']}x المتوسط")
                 lines.append(f"   📉 دعم: {stock_result['support']} | مقاومة: {stock_result['resistance']}")
@@ -442,7 +404,6 @@ def alert_message(r):
         "----------------------------------",
         f"📉 أقرب دعم: {r['support']} جنيه",
         f"📈 أقرب مقاومة: {r['resistance']} جنيه",
-        f"📊 مستوى فيبوناتشي: {r['closest_fib_level']} عند {r['closest_fib']} جنيه",
         f"📊 RSI: {r['rsi']} | CMF: {r['cmf']}",
         f"📈 حجم التداول: {r['volume_ratio']}x المتوسط",
     ]
