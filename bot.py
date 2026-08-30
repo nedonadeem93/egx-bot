@@ -18,7 +18,6 @@ if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
     raise ValueError("❌ لازم تحط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID في Secrets GitHub")
 
 def send_telegram_message(message):
-    """إرسال رسالة مع تقسيمها إذا كانت طويلة"""
     if len(message) > 4000:
         parts = [message[i:i+4000] for i in range(0, len(message), 4000)]
         for part in parts:
@@ -50,6 +49,50 @@ def get_stock_data(ticker, period="6mo"):
         print(f"❌ خطأ في {ticker}: {e}")
         return None
 
+# ==================== حساب السيولة ====================
+def get_liquid_stocks():
+    """جلب الأسهم مرتبة حسب السيولة"""
+    all_stocks = {
+        "COMI.CA": "البنك التجاري الدولي",
+        "TMGH.CA": "طلعت مصطفى",
+        "HRHO.CA": "هيرميس",
+        "CIEB.CA": "كريدي أجريكول",
+        "ADIB.CA": "مصرف أبوظبي الإسلامي",
+        "PHDC.CA": "بالم هيلز",
+        "ORAS.CA": "أوراسكوم للإنشاء",
+        "ETEL.CA": "المصرية للاتصالات",
+        "SWDY.CA": "السويدي إليكتريك",
+        "ABUK.CA": "أبو قير للأسمدة",
+        "EMFD.CA": "إعمار مصر",
+        "MNHD.CA": "مدينة مصر",
+        "HELI.CA": "مصر للجديدة للإسكان",
+        "KIMA.CA": "كيما",
+        "AMOC.CA": "أموك",
+        "ESRS.CA": "عز حديد",
+        "JUFO.CA": "جهينة",
+        "DOMT.CA": "دومتي",
+        "EAST.CA": "الشرقية للدخان",
+        "ISPH.CA": "ابن سينا فارما",
+        "RAYA.CA": "راية",
+        "FWRY.CA": "فوري"
+    }
+    
+    stock_volumes = []
+    for ticker, name in all_stocks.items():
+        try:
+            df = get_stock_data(ticker, period="5d")
+            if df is not None and not df.empty:
+                avg_volume = df['Volume'].mean()
+                avg_price = df['Close'].mean()
+                if avg_volume > 0 and avg_price > 0:
+                    stock_volumes.append((ticker, name, avg_volume * avg_price))
+        except:
+            continue
+        time.sleep(0.3)
+    
+    stock_volumes.sort(key=lambda x: x[2], reverse=True)
+    return [(ticker, name) for ticker, name, _ in stock_volumes]
+
 # ==================== حساب الدعم والمقاومة ====================
 def calculate_support_resistance(df, lookback=50):
     high = df['High'].tail(lookback)
@@ -57,11 +100,8 @@ def calculate_support_resistance(df, lookback=50):
     close = df['Close'].tail(lookback)
     current_price = close.iloc[-1]
     
-    # أقرب دعم ومقاومة
     resistance = high.max()
     support = low.min()
-    
-    # متوسط الدعم والمقاومة
     avg_resistance = high.mean()
     avg_support = low.mean()
     
@@ -77,7 +117,6 @@ def calculate_support_resistance(df, lookback=50):
 def analyze_stock(ticker, name):
     try:
         df = get_stock_data(ticker, period="6mo")
-        
         if df is None or len(df) < 50:
             return None
         
@@ -97,13 +136,12 @@ def analyze_stock(ticker, name):
         df['Price_Change_20d'] = df['Close'].pct_change(periods=20) * 100
         
         last = df.iloc[-1]
-        
         sr = calculate_support_resistance(df)
         current_price = sr['current_price']
         support = sr['support']
         resistance = sr['resistance']
         
-        # ====== سعر الدخول ======
+        # سعر الدخول
         if current_price < support * 1.02:
             entry_price = round(support * 1.01, 2)
             entry_strategy = "الشراء من الدعم"
@@ -114,10 +152,8 @@ def analyze_stock(ticker, name):
             entry_price = round(current_price * 1.005, 2)
             entry_strategy = "السعر الحالي + 0.5%"
         
-        # ====== وقف الخسارة ======
         stop_loss = round(support * 0.97, 2)
         
-        # ====== هدف الربح ======
         if resistance > current_price:
             take_profit_1 = round(resistance * 0.995, 2)
         else:
@@ -125,27 +161,23 @@ def analyze_stock(ticker, name):
         
         take_profit_2 = round(take_profit_1 * 1.02, 2)
         
-        # ====== نسبة المخاطرة/المكافأة ======
         risk = entry_price - stop_loss
         reward = take_profit_1 - entry_price
         risk_reward = round(reward / risk, 2) if risk > 0 else 0
         
-        # ====== شروط الشراء ======
-        buy_conditions = {
-            'ema_crossover': last['EMA_20'] > last['EMA_50'],
-            'rsi_ok': 45 < last['RSI'] < 70,
-            'cmf_ok': last['CMF'] > 0,
-            'volume_ok': last['Volume'] > last['Volume_MA'] * 0.7,
-            'above_ema50': last['Close'] > last['EMA_50'],
-            'near_support': current_price < support * 1.05
-        }
+        # شروط الشراء
+        is_buy = all([
+            last['EMA_20'] > last['EMA_50'],
+            45 < last['RSI'] < 70,
+            last['CMF'] > 0,
+            last['Volume'] > last['Volume_MA'] * 0.7,
+            last['Close'] > last['EMA_50']
+        ])
         
-        is_buy = all(buy_conditions.values())
-        
-        # ====== شروط البيع ======
+        # شروط البيع
         is_sell = (last['Close'] < support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
         
-        # ====== التوصية ======
+        # التوصية
         if is_buy:
             recommendation = "🔥 شراء فوري"
         elif is_sell:
@@ -154,17 +186,6 @@ def analyze_stock(ticker, name):
             recommendation = "🟡 مراقبة للشراء"
         else:
             recommendation = "⏳ انتظار"
-        
-        # ====== أسباب التوصية ======
-        reasons = []
-        if is_buy:
-            reasons.append(f"تقاطع EMA 20 فوق 50 ({round(last['EMA_20'], 2)} > {round(last['EMA_50'], 2)})")
-            reasons.append(f"RSI {round(last['RSI'], 1)} (زخم إيجابي)")
-            reasons.append(f"دعم عند {support}")
-            reasons.append(f"حجم التداول {round(last['Volume'] / last['Volume_MA'], 1)}x المتوسط")
-        elif is_sell:
-            reasons.append(f"كسر الدعم {support}" if last['Close'] < support else f"RSI {round(last['RSI'], 1)} (تشبع)")
-            reasons.append("CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50")
         
         return {
             'ticker': ticker,
@@ -189,7 +210,6 @@ def analyze_stock(ticker, name):
             'take_profit_2': take_profit_2,
             'risk_reward': risk_reward,
             'recommendation': recommendation,
-            'reasons': reasons,
             'is_buy': is_buy,
             'is_sell': is_sell,
             'above_ema50': last['Close'] > last['EMA_50']
@@ -230,10 +250,6 @@ def format_stock_report(result):
     lines.append("")
     
     lines.append(f"📌 *التوصية:* {result['recommendation']}")
-    if result['reasons']:
-        lines.append("📝 *الأسباب:*")
-        for reason in result['reasons']:
-            lines.append(f"  ✅ {reason}")
     lines.append("")
     lines.append("-" * 40)
     lines.append("")
@@ -246,34 +262,11 @@ def main():
     
     send_telegram_message("✅ *البوت شغال وجاري التحليل...*")
     
-    all_stocks = {
-        "COMI.CA": "البنك التجاري الدولي",
-        "TMGH.CA": "طلعت مصطفى",
-        "HRHO.CA": "هيرميس",
-        "CIEB.CA": "كريدي أجريكول",
-        "ADIB.CA": "مصرف أبوظبي الإسلامي",
-        "PHDC.CA": "بالم هيلز",
-        "ORAS.CA": "أوراسكوم للإنشاء",
-        "ETEL.CA": "المصرية للاتصالات",
-        "SWDY.CA": "السويدي إليكتريك",
-        "ABUK.CA": "أبو قير للأسمدة",
-        "EMFD.CA": "إعمار مصر",
-        "MNHD.CA": "مدينة مصر",
-        "HELI.CA": "مصر للجديدة للإسكان",
-        "KIMA.CA": "كيما",
-        "AMOC.CA": "أموك",
-        "ESRS.CA": "عز حديد",
-        "JUFO.CA": "جهينة",
-        "DOMT.CA": "دومتي",
-        "EAST.CA": "الشرقية للدخان",
-        "ISPH.CA": "ابن سينا فارما",
-        "RAYA.CA": "راية",
-        "FWRY.CA": "فوري"
-    }
+    # جلب الأسهم مرتبة حسب السيولة
+    liquid_stocks = get_liquid_stocks()
     
     results = []
-    
-    for ticker, name in all_stocks.items():
+    for ticker, name in liquid_stocks:
         print(f"🔍 تحليل: {name} ({ticker})")
         result = analyze_stock(ticker, name)
         if result:
