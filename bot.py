@@ -2,11 +2,10 @@ import pandas as pd
 import yfinance as yf
 import requests
 import os
-import json
 import time
 import pytz
 import ta
-from datetime import datetime, timedelta
+from datetime import datetime
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -38,14 +37,13 @@ def send_telegram_message(message):
             print(f"❌ خطأ في الإرسال: {e}")
 
 # ==================== جلب البيانات من yfinance ====================
-def get_stock_data_yfinance(ticker, period="6mo"):
+def get_stock_data(ticker, period="6mo"):
     """جلب بيانات السهم من yfinance"""
     try:
         stock = yf.Ticker(ticker)
         df = stock.history(period=period, interval="1d", progress=False)
         
         if df.empty:
-            print(f"⚠️ مفيش بيانات لـ {ticker}")
             return None
         
         if isinstance(df.columns, pd.MultiIndex):
@@ -54,160 +52,65 @@ def get_stock_data_yfinance(ticker, period="6mo"):
         return df
         
     except Exception as e:
-        print(f"❌ yfinance خطأ في {ticker}: {e}")
+        print(f"❌ خطأ في {ticker}: {e}")
         return None
 
-# ==================== حساب CMF يدوياً ====================
-def calculate_cmf(df, length=20):
-    """حساب مؤشر CMF (Chaikin Money Flow)"""
-    mf_multiplier = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
-    mf_volume = mf_multiplier * df['Volume']
-    cmf = mf_volume.rolling(window=length).sum() / df['Volume'].rolling(window=length).sum()
-    return cmf
-
-# ==================== الحصول على أعلى الأسهم سيولة ====================
-def get_top_liquid_stocks(limit=8):
-    """جلب الأسهم الأعلى سيولة (حسب حجم التداول)"""
-    all_stocks = {
-        "COMI.CA": "البنك التجاري الدولي",
-        "TMGH.CA": "طلعت مصطفى",
-        "HRHO.CA": "هيرميس",
-        "CIEB.CA": "كريدي أجريكول",
-        "ADIB.CA": "مصرف أبوظبي الإسلامي",
-        "HELI.CA": "مصر للجديدة للإسكان",
-        "PHDC.CA": "بالم هيلز",
-        "ORAS.CA": "أوراسكوم للإنشاء",
-        "MNHD.CA": "مدينة مصر",
-        "EMFD.CA": "إعمار مصر",
-        "ABUK.CA": "أبو قير للأسمدة",
-        "KIMA.CA": "كيما",
-        "ESRS.CA": "عز حديد",
-        "AMOC.CA": "أموك",
-        "EDIT.CA": "إيديتا",
-        "JUFO.CA": "جهينة",
-        "DOMT.CA": "دومتي",
-        "EAST.CA": "الشرقية للدخان",
-        "ISPH.CA": "ابن سينا فارما",
-        "ETEL.CA": "المصرية للاتصالات",
-        "SWDY.CA": "السويدي إليكتريك",
-        "RAYA.CA": "راية",
-        "FWRY.CA": "فوري",
-        "SKPC.CA": "سيدي كرير للبتروكيماويات",
-        "GBCO.CA": "جي بي كورب",
-        "BLCY.CA": "بلتون القابضة"
-    }
+# ==================== حساب الدعم والمقاومة المتقدم ====================
+def calculate_support_resistance_advanced(df, lookback=50, window=5):
+    """حساب الدعم والمقاومة بطريقة احترافية"""
+    high = df['High'].tail(lookback)
+    low = df['Low'].tail(lookback)
+    close = df['Close'].tail(lookback)
+    current_price = close.iloc[-1]
     
-    print("🔍 جاري حساب السيولة...")
-    stock_volumes = []
-    
-    for ticker, name in all_stocks.items():
-        try:
-            df = get_stock_data_yfinance(ticker, period="5d")
-            
-            if df is None or df.empty:
-                continue
-            
-            last_day = df.iloc[-1]
-            volume = last_day['Volume']
-            price = last_day['Close']
-            
-            if volume > 0 and price > 0:
-                value = volume * price
-                stock_volumes.append((ticker, name, value))
-                print(f"  ✅ {name}: {value:,.0f} جنيه")
-                
-        except Exception as e:
-            print(f"  ❌ فشل {ticker}: {str(e)[:50]}")
-            continue
-        
-        time.sleep(0.3)
-    
-    stock_volumes.sort(key=lambda x: x[2], reverse=True)
-    
-    top_stocks = {}
-    for ticker, name, value in stock_volumes[:limit]:
-        top_stocks[ticker] = name
-        print(f"  🏆 {name}: {value:,.0f} جنيه")
-    
-    return top_stocks
-
-# ==================== تحليل السوق العام ====================
-def market_trend():
-    """تحديد اتجاه السوق العام"""
-    try:
-        df = get_stock_data_yfinance("^EGX30", period="3mo")
-        if df is None or df.empty:
-            return "محايد 🟡"
-        
-        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
-        last_close = df['Close'].iloc[-1]
-        last_ema = df['EMA_50'].iloc[-1]
-        
-        performance = ((df['Close'].iloc[-1] / df['Close'].iloc[-20]) - 1) * 100
-        
-        if last_close > last_ema and performance > 0:
-            return "صاعد 🟢"
-        elif last_close < last_ema and performance < 0:
-            return "هابط 🔴"
-        else:
-            return "محايد 🟡"
-    except:
-        return "محايد 🟡"
-
-# ==================== حساب الدعم والمقاومة المحسن ====================
-def calculate_support_resistance_enhanced(df, lookback=30):
-    """حساب الدعم والمقاومة بطريقة محسنة"""
-    last = df.iloc[-1]
-    current_price = last['Close']
-    
-    # أعلى وأدنى 30 يوم
-    high_30 = df['High'].tail(lookback)
-    low_30 = df['Low'].tail(lookback)
-    
-    resistance = high_30.max()
-    support = low_30.min()
-    
-    # حساب القمم والقيعان المحلية (أدق)
+    # قمم محلية
     peaks = []
     troughs = []
     
-    for i in range(5, len(high_30) - 5):
-        if high_30.iloc[i] == high_30.iloc[i-5:i+6].max():
-            peaks.append(high_30.iloc[i])
-        if low_30.iloc[i] == low_30.iloc[i-5:i+6].min():
-            troughs.append(low_30.iloc[i])
+    for i in range(window, len(high) - window):
+        if high.iloc[i] == high.iloc[i-window:i+window+1].max():
+            peaks.append(high.iloc[i])
+        if low.iloc[i] == low.iloc[i-window:i+window+1].min():
+            troughs.append(low.iloc[i])
     
-    # أقرب مقاومة فوق السعر
-    resistances_above = [p for p in peaks if p > current_price]
-    closest_resistance = min(resistances_above) if resistances_above else resistance
+    # أقرب دعم ومقاومة
+    resistances = [p for p in peaks if p > current_price]
+    resistance = min(resistances) if resistances else high.max()
     
-    # أقرب دعم تحت السعر
-    supports_below = [t for t in troughs if t < current_price]
-    closest_support = max(supports_below) if supports_below else support
+    supports = [t for t in troughs if t < current_price]
+    support = max(supports) if supports else low.min()
+    
+    # متوسط الدعم والمقاومة (آخر 50 يوم)
+    avg_resistance = high.mean()
+    avg_support = low.mean()
     
     return {
-        'support': round(closest_support, 2),
-        'resistance': round(closest_resistance, 2),
-        'main_support': round(support, 2),
-        'main_resistance': round(resistance, 2),
+        'support': round(support, 2),
+        'resistance': round(resistance, 2),
+        'avg_support': round(avg_support, 2),
+        'avg_resistance': round(avg_resistance, 2),
         'current_price': round(current_price, 2)
     }
 
 # ==================== تحليل السهم ====================
 def analyze_stock(ticker, name):
-    """تحليل سهم واحد مع دعم ومقاومة محسنة"""
+    """تحليل سهم واحد مع دعم ومقاومة متقدم"""
     try:
-        df = get_stock_data_yfinance(ticker, period="6mo")
+        df = get_stock_data(ticker, period="6mo")
         
-        if df is None or df.empty or len(df) < 50:
+        if df is None or len(df) < 50:
             return None
         
         # ====== المؤشرات الفنية ======
         df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
         df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
-        df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
-        df['CMF'] = calculate_cmf(df, length=20)
+        
+        # حساب CMF يدوياً
+        mf_multiplier = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
+        mf_volume = mf_multiplier * df['Volume']
+        df['CMF'] = mf_volume.rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
+        
         df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
         df['Price_Change_1d'] = df['Close'].pct_change() * 100
         df['Price_Change_5d'] = df['Close'].pct_change(periods=5) * 100
@@ -215,18 +118,18 @@ def analyze_stock(ticker, name):
         
         last = df.iloc[-1]
         
-        # ====== حساب الدعم والمقاومة المحسن ======
-        sr = calculate_support_resistance_enhanced(df)
+        # ====== حساب الدعم والمقاومة المتقدم ======
+        sr = calculate_support_resistance_advanced(df)
         current_price = sr['current_price']
         support = sr['support']
         resistance = sr['resistance']
-        main_support = sr['main_support']
-        main_resistance = sr['main_resistance']
+        avg_support = sr['avg_support']
+        avg_resistance = sr['avg_resistance']
         
         # ====== سعر الدخول المثالي ======
         if current_price < support * 1.02:
             entry_price = round(support * 1.01, 2)
-            entry_strategy = "الارتداد من الدعم"
+            entry_strategy = "الشراء من الدعم"
         elif current_price > resistance * 0.98:
             entry_price = round(resistance * 1.005, 2)
             entry_strategy = "اختراق المقاومة"
@@ -235,15 +138,15 @@ def analyze_stock(ticker, name):
             entry_strategy = "السعر الحالي + 0.5%"
         
         # ====== وقف الخسارة ======
-        stop_loss = round(main_support * 0.97, 2)
+        stop_loss = round(support * 0.98, 2)
         
         # ====== هدف الربح ======
-        if main_resistance > current_price:
-            take_profit_1 = round(main_resistance * 0.995, 2)
+        if resistance > current_price:
+            take_profit_1 = round(resistance, 2)
         else:
             take_profit_1 = round(current_price * 1.05, 2)
         
-        take_profit_2 = round(take_profit_1 * 1.02, 2)
+        take_profit_2 = round(take_profit_1 * 1.03, 2)
         
         # ====== نسبة المخاطرة/المكافأة ======
         risk = entry_price - stop_loss
@@ -263,56 +166,42 @@ def analyze_stock(ticker, name):
         is_buy = all(buy_conditions.values())
         
         # ====== شروط الخروج (بيع) ======
-        is_sell = (last['Close'] < main_support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
+        is_sell = (last['Close'] < support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
         
-        # ====== تحديد الإشارة ======
-        signal = "انتظار ⏳"
-        signal_type = "none"
-        reasons = []
-        
+        # ====== تحديد التوصية ======
         if is_buy:
-            signal = "🔥 شراء فوري"
-            signal_type = "buy"
-            reasons = [
-                f"تقاطع EMA 20 فوق 50 ({round(last['EMA_20'], 2)} > {round(last['EMA_50'], 2)})",
-                f"RSI {round(last['RSI'], 1)} (زخم إيجابي)",
-                f"دعم عند {support}",
-                f"حجم التداول {round(last['Volume'] / last['Volume_MA'], 1)}x المتوسط"
-            ]
+            recommendation = "🔥 شراء فوري"
         elif is_sell:
-            signal = "⚠️ بيع/خروج"
-            signal_type = "sell"
-            reasons = [
-                f"كسر الدعم {main_support}" if last['Close'] < main_support else f"RSI {round(last['RSI'], 1)} (تشبع)",
-                "CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50"
-            ]
+            recommendation = "⚠️ بيع/خروج"
+        elif last['Close'] < last['EMA_50'] and last['RSI'] < 40:
+            recommendation = "🟡 مراقبة للشراء"
+        else:
+            recommendation = "⏳ انتظار"
         
+        # ====== تجميع النتائج ======
         return {
             'ticker': ticker,
             'name': name,
             'price': round(current_price, 2),
-            'ema_20': round(last['EMA_20'], 2),
-            'ema_50': round(last['EMA_50'], 2),
-            'rsi': round(last['RSI'], 1),
-            'cmf': round(last['CMF'], 3),
-            'atr': round(last['ATR'], 2),
-            'volume_ratio': round(last['Volume'] / last['Volume_MA'], 1),
             'change_1d': round(last['Price_Change_1d'], 2),
             'change_5d': round(last['Price_Change_5d'], 2),
             'change_20d': round(last['Price_Change_20d'], 2),
+            'rsi': round(last['RSI'], 1),
+            'cmf': round(last['CMF'], 3),
+            'ema_20': round(last['EMA_20'], 2),
+            'ema_50': round(last['EMA_50'], 2),
+            'volume_ratio': round(last['Volume'] / last['Volume_MA'], 1),
             'support': support,
             'resistance': resistance,
-            'main_support': main_support,
-            'main_resistance': main_resistance,
+            'avg_support': avg_support,
+            'avg_resistance': avg_resistance,
             'entry_price': entry_price,
             'entry_strategy': entry_strategy,
             'stop_loss': stop_loss,
             'take_profit_1': take_profit_1,
             'take_profit_2': take_profit_2,
             'risk_reward': risk_reward,
-            'signal': signal,
-            'signal_type': signal_type,
-            'reasons': reasons,
+            'recommendation': recommendation,
             'is_buy': is_buy,
             'is_sell': is_sell,
             'above_ema50': last['Close'] > last['EMA_50']
@@ -322,250 +211,128 @@ def analyze_stock(ticker, name):
         print(f"❌ خطأ في {ticker}: {e}")
         return None
 
-# ==================== التقرير الصباحي ====================
-def morning_report(top_liquid, all_results, trend):
-    """توليد التقرير الصباحي المحسن"""
+# ==================== تنسيق التقرير ====================
+def format_stock_report(result):
+    """تنسيق تقرير سهم واحد"""
     lines = []
     
-    egypt_tz = pytz.timezone('Africa/Cairo')
-    now = datetime.now(egypt_tz)
-    
-    lines.append("🌅 *التقرير الصباحي - البورصة المصرية*")
-    lines.append(f"📅 {now.strftime('%Y-%m-%d %H:%M')}")
-    lines.append(f"🌍 *اتجاه السوق العام:* {trend}")
-    lines.append("=" * 50)
+    # ====== رأس السهم ======
+    lines.append(f"📊 *{result['name']}* (`{result['ticker']}`)")
+    lines.append(f"💰 السعر الحالي: {result['price']} جنيه")
+    lines.append(f"📈 التغيير اليومي: {result['change_1d']}% | الأسبوعي: {result['change_5d']}% | 20 يوم: {result['change_20d']}%")
     lines.append("")
     
-    # ====== الأسهم الأكثر سيولة ======
-    if top_liquid:
-        lines.append("🔥 *الأسهم الأكثر سيولة (للمراقبة اليومية):*")
-        for i, (ticker, name) in enumerate(top_liquid.items(), 1):
-            stock_result = next((r for r in all_results if r and r['ticker'] == ticker), None)
-            if stock_result:
-                trend_emoji = "📈" if stock_result['above_ema50'] else "📉"
-                lines.append(f"{i}. {trend_emoji} *{name}* (`{ticker}`)")
-                lines.append(f"   💰 السعر: {stock_result['price']} جنيه")
-                lines.append(f"   📊 RSI: {stock_result['rsi']} | CMF: {stock_result['cmf']}")
-                lines.append(f"   📈 حجم: {stock_result['volume_ratio']}x المتوسط")
-                lines.append(f"   🛡️ دعم قريب: {stock_result['support']} | 🚀 مقاومة قريبة: {stock_result['resistance']}")
-                lines.append(f"   🛡️ الدعم الرئيسي: {stock_result['main_support']} | 🚀 المقاومة الرئيسية: {stock_result['main_resistance']}")
-            else:
-                lines.append(f"{i}. {name} (`{ticker}`)")
-        lines.append("")
-    else:
-        lines.append("⚠️ *تعذر حساب السيولة - استخدم القائمة اليدوية:*")
-        default_liquid = ["COMI.CA", "TMGH.CA", "HRHO.CA", "CIEB.CA", "ADIB.CA"]
-        for ticker in default_liquid:
-            stock_result = next((r for r in all_results if r and r['ticker'] == ticker), None)
-            if stock_result:
-                lines.append(f"• {stock_result['name']} (`{ticker}`) - {stock_result['price']} جنيه")
-        lines.append("")
-    
-    lines.append("=" * 50)
+    # ====== المؤشرات الفنية ======
+    lines.append("📊 *المؤشرات الفنية:*")
+    lines.append(f"• RSI: {result['rsi']} | CMF: {result['cmf']}")
+    lines.append(f"• EMA 20: {result['ema_20']} | EMA 50: {result['ema_50']}")
+    lines.append(f"• حجم التداول: {result['volume_ratio']}x المتوسط")
     lines.append("")
     
-    # ====== إشارات الشراء ======
-    buy_signals = [r for r in all_results if r and r['is_buy']]
-    if buy_signals:
-        lines.append("🟢 *إشارات شراء قوية:*")
-        for r in buy_signals[:8]:
-            lines.append(f"• *{r['name']}* (`{r['ticker']}`)")
-            lines.append(f"  💰 السعر: {r['price']} جنيه")
-            lines.append(f"  📊 RSI: {r['rsi']} | CMF: {r['cmf']}")
-            lines.append(f"  📈 حجم التداول: {r['volume_ratio']}x المتوسط")
-            lines.append(f"  📈 الأداء 20 يوم: {r['change_20d']}%")
-            lines.append(f"  🎯 الدخول: {r['entry_price']} | وقف: {r['stop_loss']} | هدف: {r['take_profit_1']}")
-            lines.append(f"  🛡️ دعم: {r['support']} | 🚀 مقاومة: {r['resistance']}")
-            if r['reasons']:
-                lines.append(f"  ✅ {r['reasons'][0]}")
-        lines.append("")
-    else:
-        lines.append("🟡 *لا توجد إشارات شراء قوية حالياً.*")
-        lines.append("")
-    
-    # ====== إشارات البيع ======
-    sell_signals = [r for r in all_results if r and r['is_sell']]
-    if sell_signals:
-        lines.append("🔴 *إشارات بيع/خروج:*")
-        for r in sell_signals[:5]:
-            lines.append(f"• *{r['name']}* (`{r['ticker']}`)")
-            lines.append(f"  💰 السعر: {r['price']} جنيه")
-            lines.append(f"  📊 RSI: {r['rsi']} | CMF: {r['cmf']}")
-            if r['reasons']:
-                lines.append(f"  ⚠️ {r['reasons'][0]}")
-        lines.append("")
-    
-    # ====== ملخص ======
-    lines.append("=" * 50)
-    lines.append("📊 *ملخص سريع:*")
-    lines.append(f"• إجمالي الأسهم: {len(all_results)}")
-    lines.append(f"• إشارات شراء: {len(buy_signals)}")
-    lines.append(f"• إشارات بيع: {len(sell_signals)}")
+    # ====== الدعم والمقاومة ======
+    lines.append("🛡️ *الدعم والمقاومة:*")
+    lines.append(f"• أقرب دعم: {result['support']} جنيه")
+    lines.append(f"• أقرب مقاومة: {result['resistance']} جنيه")
+    lines.append(f"• متوسط الدعم (50 يوم): {result['avg_support']} جنيه")
+    lines.append(f"• متوسط المقاومة (50 يوم): {result['avg_resistance']} جنيه")
     lines.append("")
     
-    # ====== نصائح ======
-    lines.append("💡 *نصائح اليوم:*")
-    if trend == "صاعد 🟢":
-        lines.append("• السوق في اتجاه صاعد - ركز على إشارات الشراء")
-    elif trend == "هابط 🔴":
-        lines.append("• السوق في اتجاه هابط - قلل حجم الصفقات")
-    else:
-        lines.append("• السوق في حالة محايدة - انتظر وضوح الاتجاه")
+    # ====== سعر الدخول والخروج ======
+    lines.append("🎯 *سعر الدخول والخروج المثالي:*")
+    lines.append(f"• سعر الدخول: {result['entry_price']} جنيه ({result['entry_strategy']})")
+    lines.append(f"• وقف الخسارة: {result['stop_loss']} جنيه")
+    lines.append(f"• الهدف الأول: {result['take_profit_1']} جنيه")
+    lines.append(f"• الهدف الثاني: {result['take_profit_2']} جنيه")
+    lines.append(f"• نسبة المخاطرة/المكافأة: 1:{result['risk_reward']}")
+    lines.append("")
     
-    lines.append("• لا تدخل في صفقة بدون وقف خسارة")
-    lines.append("• خذ ربح جزئي عند تحقيق الهدف الأول")
+    # ====== التوصية ======
+    lines.append(f"📌 *التوصية:* {result['recommendation']}")
+    lines.append("")
+    lines.append("-" * 40)
+    lines.append("")
     
     return "\n".join(lines)
-
-# ==================== تنبيه فوري ====================
-def alert_message(r):
-    """تنسيق رسالة التنبيه الفوري"""
-    if r['is_buy']:
-        emoji = "🔥"
-        title = "تنبيه شراء فوري"
-        color = "🟢"
-    elif r['is_sell']:
-        emoji = "⚠️"
-        title = "تنبيه بيع/خروج"
-        color = "🔴"
-    else:
-        return None
-    
-    lines = [
-        f"{emoji} *{title} - {r['name']}*",
-        f"{color} السهم: `{r['ticker']}`",
-        "----------------------------------",
-        f"💰 السعر الحالي: {r['price']} جنيه",
-        f"🎯 سعر الدخول: {r['entry_price']} جنيه ({r['entry_strategy']})",
-        f"🛑 وقف الخسارة: {r['stop_loss']} جنيه",
-        f"🏆 الهدف الأول: {r['take_profit_1']} جنيه",
-        f"🏆 الهدف الثاني: {r['take_profit_2']} جنيه",
-        f"📊 نسبة المخاطرة/المكافأة: 1:{r['risk_reward']}",
-        "----------------------------------",
-        f"🛡️ أقرب دعم: {r['support']} جنيه",
-        f"🚀 أقرب مقاومة: {r['resistance']} جنيه",
-        f"📊 RSI: {r['rsi']} | CMF: {r['cmf']}",
-        f"📈 حجم التداول: {r['volume_ratio']}x المتوسط",
-    ]
-    
-    if r['reasons']:
-        lines.append("📝 الأسباب:")
-        for reason in r['reasons'][:4]:
-            lines.append(f"  ✅ {reason}")
-    
-    egypt_tz = pytz.timezone('Africa/Cairo')
-    now = datetime.now(egypt_tz)
-    lines.append("")
-    lines.append(f"⏰ {now.strftime('%H:%M:%S')}")
-    
-    return "\n".join(lines)
-
-# ==================== منع التكرار ====================
-def is_duplicate_run():
-    lock_file = "last_run.json"
-    if os.path.exists(lock_file):
-        try:
-            with open(lock_file, 'r') as f:
-                data = json.load(f)
-                last_run = datetime.fromisoformat(data['last_run'])
-                if (datetime.now() - last_run).seconds < 300:
-                    return True
-        except:
-            pass
-    return False
-
-def save_run_time():
-    lock_file = "last_run.json"
-    with open(lock_file, 'w') as f:
-        json.dump({'last_run': datetime.now().isoformat()}, f)
 
 # ==================== الدالة الرئيسية ====================
 def main():
-    print("🚀 بدء تشغيل النظام المتكامل...")
+    print("🚀 بدء تشغيل البوت...")
     
-    if is_duplicate_run():
-        print("⏳ تم التشغيل مؤخراً، تخطي...")
-        return
-    
-    top_liquid = get_top_liquid_stocks(limit=8)
-    print(f"✅ تم اختيار {len(top_liquid)} سهم عالي السيولة")
-    
-    trend = market_trend()
-    print(f"🌍 اتجاه السوق: {trend}")
-    
+    # قائمة الأسهم المصرية (المختصرة والموثوقة)
     all_stocks = {
         "COMI.CA": "البنك التجاري الدولي",
         "TMGH.CA": "طلعت مصطفى",
         "HRHO.CA": "هيرميس",
         "CIEB.CA": "كريدي أجريكول",
         "ADIB.CA": "مصرف أبوظبي الإسلامي",
-        "HELI.CA": "مصر للجديدة للإسكان",
         "PHDC.CA": "بالم هيلز",
         "ORAS.CA": "أوراسكوم للإنشاء",
-        "MNHD.CA": "مدينة مصر",
-        "EMFD.CA": "إعمار مصر",
+        "ETEL.CA": "المصرية للاتصالات",
+        "SWDY.CA": "السويدي إليكتريك",
         "ABUK.CA": "أبو قير للأسمدة",
+        "EMFD.CA": "إعمار مصر",
+        "MNHD.CA": "مدينة مصر",
+        "HELI.CA": "مصر للجديدة للإسكان",
         "KIMA.CA": "كيما",
-        "ESRS.CA": "عز حديد",
         "AMOC.CA": "أموك",
-        "EDIT.CA": "إيديتا",
+        "ESRS.CA": "عز حديد",
         "JUFO.CA": "جهينة",
         "DOMT.CA": "دومتي",
         "EAST.CA": "الشرقية للدخان",
         "ISPH.CA": "ابن سينا فارما",
-        "ETEL.CA": "المصرية للاتصالات",
-        "SWDY.CA": "السويدي إليكتريك",
         "RAYA.CA": "راية",
-        "FWRY.CA": "فوري",
-        "SKPC.CA": "سيدي كرير للبتروكيماويات",
-        "GBCO.CA": "جي بي كورب",
-        "BLCY.CA": "بلتون القابضة"
+        "FWRY.CA": "فوري"
     }
     
-    all_results = []
-    alerts_sent = 0
+    results = []
     
     for ticker, name in all_stocks.items():
-        print(f"🔍 تحليل: {name}")
+        print(f"🔍 تحليل: {name} ({ticker})")
         result = analyze_stock(ticker, name)
         if result:
-            all_results.append(result)
-            
-            if ticker in top_liquid and (result['is_buy'] or result['is_sell']):
-                alert = alert_message(result)
-                if alert:
-                    send_telegram_message(f"🔔 *تنبيه فوري*\n\n{alert}")
-                    alerts_sent += 1
-                    print(f"✅ تم إرسال تنبيه لـ {name}")
-            
-            time.sleep(0.3)
+            results.append(result)
+        time.sleep(0.5)
     
-    report = morning_report(top_liquid, all_results, trend)
-    send_telegram_message(report)
-    print("✅ تم إرسال التقرير الصباحي")
-    
-    buy_count = len([r for r in all_results if r and r['is_buy']])
-    sell_count = len([r for r in all_results if r and r['is_sell']])
-    
-    egypt_tz = pytz.timezone('Africa/Cairo')
-    now = datetime.now(egypt_tz)
-    
-    summary = f"""
+    # ====== إرسال التقرير ======
+    if results:
+        # تقرير كامل
+        full_report = []
+        full_report.append("🌅 *التقرير الصباحي - البورصة المصرية*")
+        full_report.append(f"📅 {datetime.now(pytz.timezone('Africa/Cairo')).strftime('%Y-%m-%d %H:%M')}")
+        full_report.append("=" * 40)
+        full_report.append("")
+        
+        for result in results:
+            full_report.append(format_stock_report(result))
+        
+        send_telegram_message("\n".join(full_report))
+        
+        # ====== ملخص الإشارات القوية ======
+        buy_signals = [r for r in results if r['is_buy']]
+        if buy_signals:
+            summary = ["🔥 *إشارات شراء قوية:*"]
+            for r in buy_signals[:5]:
+                summary.append(f"• {r['name']} - الدخول: {r['entry_price']} | الهدف: {r['take_profit_1']} | وقف: {r['stop_loss']}")
+            send_telegram_message("\n".join(summary))
+        
+        # ====== ملخص التحليل ======
+        buy_count = len([r for r in results if r['is_buy']])
+        sell_count = len([r for r in results if r['is_sell']])
+        
+        summary = f"""
 📊 *ملخص التحليل:*
-• إجمالي الأسهم المحللة: {len(all_results)}
+• إجمالي الأسهم: {len(results)}
 • إشارات شراء: {buy_count}
 • إشارات بيع: {sell_count}
-• تنبيهات مرسلة: {alerts_sent}
-• اتجاه السوق: {trend}
 
-⏰ {now.strftime('%Y-%m-%d %H:%M:%S')}
+💡 *نصائح اليوم:*
+• لا تخاطر بأكثر من 2% من رأس المال في صفقة واحدة
+• التزم بوقف الخسارة المحدد
+• خذ ربح جزئي عند الهدف الأول
 """
-    send_telegram_message(summary)
-    print("✅ تم إرسال الملخص")
+        send_telegram_message(summary)
     
-    save_run_time()
-    
-    print(f"🏁 انتهى التشغيل. الإشارات: شراء {buy_count} | بيع {sell_count} | تنبيهات {alerts_sent}")
+    print(f"🏁 انتهى التشغيل. عدد الأسهم: {len(results)}")
 
 if __name__ == "__main__":
     main()
