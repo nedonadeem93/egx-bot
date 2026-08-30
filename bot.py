@@ -1,230 +1,111 @@
 import pandas as pd
+import pandas_ta as ta
 import yfinance as yf
 import requests
 import os
+from datetime import datetime
 import time
-import pytz
-import ta
-import random
-from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
 
+# ==================== إعدادات التليجرام ====================
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise ValueError("❌ لازم تحط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID في Secrets GitHub")
+    raise ValueError("❌ يجب تعيين TELEGRAM_TOKEN و TELEGRAM_CHAT_ID")
 
 def send_telegram_message(message):
-    if len(message) > 4000:
-        parts = [message[i:i+4000] for i in range(0, len(message), 4000)]
-        for part in parts:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": part, "parse_mode": "Markdown"}
-            try:
-                requests.post(url, json=payload, timeout=10)
-            except Exception as e:
-                print(f"❌ خطأ في الإرسال: {e}")
-    else:
-        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
-        try:
-            requests.post(url, json=payload, timeout=10)
-        except Exception as e:
-            print(f"❌ خطأ في الإرسال: {e}")
-
-# ==================== بيانات تجريبية ====================
-def get_mock_data(ticker, period="6mo"):
-    """توليد بيانات تجريبية للأسهم المصرية"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
     try:
-        # محاولة جلب بيانات حقيقية أولاً
-        stock = yf.Ticker(ticker)
-        df = stock.history(period=period, interval="1d", progress=False)
-        
-        if df is not None and not df.empty and len(df) > 10:
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
-            return df
-        
-        # لو فشل، نولد بيانات تجريبية
-        print(f"⚠️ {ticker}: جاري استخدام بيانات تجريبية")
-        
-        # تاريخ عشوائي
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=180)
-        dates = pd.date_range(start=start_date, end=end_date, freq='D')
-        dates = dates[dates.dayofweek < 5]  # أيام الأسبوع بس
-        
-        # سعر أساسي حسب التيكر
-        base_prices = {
-            "COMI.CA": 139, "TMGH.CA": 97, "HRHO.CA": 85,
-            "CIEB.CA": 24, "ADIB.CA": 53, "PHDC.CA": 14,
-            "ORAS.CA": 71, "ETEL.CA": 116, "SWDY.CA": 127,
-            "ABUK.CA": 75, "EMFD.CA": 11, "MNHD.CA": 38,
-            "HELI.CA": 45, "KIMA.CA": 20, "AMOC.CA": 10,
-            "ESRS.CA": 30, "JUFO.CA": 25, "DOMT.CA": 28,
-            "EAST.CA": 35, "ISPH.CA": 12, "RAYA.CA": 7,
-            "FWRY.CA": 18
-        }
-        base = base_prices.get(ticker, 50)
-        
-        data = []
-        price = base
-        for i, date in enumerate(dates):
-            # حركة عشوائية
-            change = random.uniform(-0.03, 0.03)
-            price = price * (1 + change)
-            if price < 0.1:
-                price = 0.1
-            
-            volume = random.randint(100000, 5000000)
-            high = price * (1 + random.uniform(0.005, 0.02))
-            low = price * (1 - random.uniform(0.005, 0.02))
-            open_price = price * (1 + random.uniform(-0.01, 0.01))
-            
-            data.append({
-                'Open': open_price,
-                'High': high,
-                'Low': low,
-                'Close': price,
-                'Volume': volume
-            })
-        
-        df = pd.DataFrame(data, index=dates)
-        return df
-        
+        requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"❌ خطأ في {ticker}: {e}")
-        return None
+        print(f"❌ خطأ في الإرسال: {e}")
 
-# ==================== حساب الدعم والمقاومة ====================
-def calculate_support_resistance(df, lookback=50):
-    high = df['High'].tail(lookback)
-    low = df['Low'].tail(lookback)
-    close = df['Close'].tail(lookback)
-    current_price = close.iloc[-1]
-    
-    resistance = high.max()
-    support = low.min()
-    avg_resistance = high.mean()
-    avg_support = low.mean()
-    
-    return {
-        'support': round(support, 2),
-        'resistance': round(resistance, 2),
-        'avg_support': round(avg_support, 2),
-        'avg_resistance': round(avg_resistance, 2),
-        'current_price': round(current_price, 2)
-    }
+# ==================== تحليل السوق العام ====================
+def market_trend():
+    """تحديد اتجاه السوق العام"""
+    try:
+        df = yf.download("^EGX30", period="3mo", interval="1d", progress=False)
+        if df.empty:
+            return "محايد 🟡"
+        
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
+        df['EMA_50'] = ta.ema(df['Close'], length=50)
+        last_close = df['Close'].iloc[-1]
+        last_ema = df['EMA_50'].iloc[-1]
+        
+        performance = ((df['Close'].iloc[-1] / df['Close'].iloc[-20]) - 1) * 100
+        
+        if last_close > last_ema and performance > 0:
+            return "صاعد 🟢"
+        elif last_close < last_ema and performance < 0:
+            return "هابط 🔴"
+        else:
+            return "محايد 🟡"
+    except:
+        return "محايد 🟡"
 
 # ==================== تحليل السهم ====================
 def analyze_stock(ticker, name):
     try:
-        df = get_mock_data(ticker, period="6mo")
-        if df is None or len(df) < 50:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="6mo", interval="1d")
+        
+        if df.empty or len(df) < 50:
             return None
         
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+        
         # المؤشرات الفنية
-        df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
-        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
-        df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
-        
-        # CMF
-        mf_multiplier = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
-        mf_volume = mf_multiplier * df['Volume']
-        df['CMF'] = mf_volume.rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
-        
-        df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
-        df['Price_Change_1d'] = df['Close'].pct_change() * 100
-        df['Price_Change_5d'] = df['Close'].pct_change(periods=5) * 100
-        df['Price_Change_20d'] = df['Close'].pct_change(periods=20) * 100
+        df['EMA_20'] = ta.ema(df['Close'], length=20)
+        df['EMA_50'] = ta.ema(df['Close'], length=50)
+        df['RSI'] = ta.rsi(df['Close'], length=14)
+        df['CMF'] = ta.cmf(df['High'], df['Low'], df['Close'], df['Volume'], length=20)
+        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
         
         last = df.iloc[-1]
-        sr = calculate_support_resistance(df)
-        current_price = sr['current_price']
-        support = sr['support']
-        resistance = sr['resistance']
+        
+        # حساب الدعم والمقاومة
+        high = df['High'].tail(30)
+        low = df['Low'].tail(30)
+        resistance = high.max()
+        support = low.min()
         
         # سعر الدخول
-        if current_price < support * 1.02:
-            entry_price = round(support * 1.01, 2)
-            entry_strategy = "الشراء من الدعم"
-        elif current_price > resistance * 0.98:
-            entry_price = round(resistance * 1.005, 2)
-            entry_strategy = "اختراق المقاومة"
-        else:
-            entry_price = round(current_price * 1.005, 2)
-            entry_strategy = "السعر الحالي + 0.5%"
-        
+        entry_price = round(last['Close'] * 1.005, 2)
         stop_loss = round(support * 0.97, 2)
-        
-        if resistance > current_price:
-            take_profit_1 = round(resistance * 0.995, 2)
-        else:
-            take_profit_1 = round(current_price * 1.05, 2)
-        
-        take_profit_2 = round(take_profit_1 * 1.02, 2)
-        
-        risk = entry_price - stop_loss
-        reward = take_profit_1 - entry_price
-        risk_reward = round(reward / risk, 2) if risk > 0 else 0
+        take_profit = round(resistance * 0.995 if resistance > last['Close'] else last['Close'] * 1.05, 2)
         
         # شروط الشراء
         is_buy = all([
             last['EMA_20'] > last['EMA_50'],
             45 < last['RSI'] < 70,
             last['CMF'] > 0,
-            last['Volume'] > last['Volume_MA'] * 0.7,
+            last['Volume'] > df['Volume'].rolling(20).mean().iloc[-1] * 0.7,
             last['Close'] > last['EMA_50']
         ])
         
-        is_sell = (last['Close'] < support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
-        
-        if is_buy:
-            recommendation = "🔥 شراء فوري"
-        elif is_sell:
-            recommendation = "⚠️ بيع/خروج"
-        elif last['Close'] < last['EMA_50'] and last['RSI'] < 40:
-            recommendation = "🟡 مراقبة للشراء"
-        else:
-            recommendation = "⏳ انتظار"
-        
-        reasons = []
-        if is_buy:
-            reasons.append(f"تقاطع EMA 20 فوق 50 ({round(last['EMA_20'], 2)} > {round(last['EMA_50'], 2)})")
-            reasons.append(f"RSI {round(last['RSI'], 1)} (زخم إيجابي)")
-            reasons.append(f"دعم عند {support}")
-            reasons.append(f"حجم التداول {round(last['Volume'] / last['Volume_MA'], 1)}x المتوسط")
-        elif is_sell:
-            reasons.append(f"كسر الدعم {support}" if last['Close'] < support else f"RSI {round(last['RSI'], 1)} (تشبع)")
-            reasons.append("CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50")
+        # شروط البيع
+        is_sell = (last['Close'] < support or last['RSI'] > 75) and last['RSI'] > 60
         
         return {
             'ticker': ticker,
             'name': name,
-            'price': round(current_price, 2),
-            'change_1d': round(last['Price_Change_1d'], 2),
-            'change_5d': round(last['Price_Change_5d'], 2),
-            'change_20d': round(last['Price_Change_20d'], 2),
+            'price': round(last['Close'], 2),
             'rsi': round(last['RSI'], 1),
             'cmf': round(last['CMF'], 3),
-            'ema_20': round(last['EMA_20'], 2),
-            'ema_50': round(last['EMA_50'], 2),
-            'volume_ratio': round(last['Volume'] / last['Volume_MA'], 1),
-            'support': support,
-            'resistance': resistance,
-            'avg_support': sr['avg_support'],
-            'avg_resistance': sr['avg_resistance'],
+            'volume_ratio': round(last['Volume'] / df['Volume'].rolling(20).mean().iloc[-1], 1),
+            'support': round(support, 2),
+            'resistance': round(resistance, 2),
             'entry_price': entry_price,
-            'entry_strategy': entry_strategy,
             'stop_loss': stop_loss,
-            'take_profit_1': take_profit_1,
-            'take_profit_2': take_profit_2,
-            'risk_reward': risk_reward,
-            'recommendation': recommendation,
-            'reasons': reasons,
+            'take_profit': take_profit,
             'is_buy': is_buy,
             'is_sell': is_sell,
             'above_ema50': last['Close'] > last['EMA_50']
@@ -234,52 +115,9 @@ def analyze_stock(ticker, name):
         print(f"❌ خطأ في {ticker}: {e}")
         return None
 
-# ==================== تنسيق التقرير ====================
-def format_stock_report(result):
-    lines = []
-    
-    lines.append(f"📊 *{result['name']}* (`{result['ticker']}`)")
-    lines.append(f"💰 السعر الحالي: {result['price']} جنيه")
-    lines.append(f"📈 التغيير اليومي: {result['change_1d']}% | الأسبوعي: {result['change_5d']}% | 20 يوم: {result['change_20d']}%")
-    lines.append("")
-    
-    lines.append("📊 *المؤشرات الفنية:*")
-    lines.append(f"• RSI: {result['rsi']} | CMF: {result['cmf']}")
-    lines.append(f"• EMA 20: {result['ema_20']} | EMA 50: {result['ema_50']}")
-    lines.append(f"• حجم التداول: {result['volume_ratio']}x المتوسط")
-    lines.append("")
-    
-    lines.append("🛡️ *الدعم والمقاومة:*")
-    lines.append(f"• أقرب دعم: {result['support']} جنيه")
-    lines.append(f"• أقرب مقاومة: {result['resistance']} جنيه")
-    lines.append(f"• متوسط الدعم (50 يوم): {result['avg_support']} جنيه")
-    lines.append(f"• متوسط المقاومة (50 يوم): {result['avg_resistance']} جنيه")
-    lines.append("")
-    
-    lines.append("🎯 *سعر الدخول والخروج المثالي:*")
-    lines.append(f"• سعر الدخول: {result['entry_price']} جنيه ({result['entry_strategy']})")
-    lines.append(f"• وقف الخسارة: {result['stop_loss']} جنيه")
-    lines.append(f"• الهدف الأول: {result['take_profit_1']} جنيه")
-    lines.append(f"• الهدف الثاني: {result['take_profit_2']} جنيه")
-    lines.append(f"• نسبة المخاطرة/المكافأة: 1:{result['risk_reward']}")
-    lines.append("")
-    
-    lines.append(f"📌 *التوصية:* {result['recommendation']}")
-    if result['reasons']:
-        lines.append("📝 *الأسباب:*")
-        for reason in result['reasons']:
-            lines.append(f"  ✅ {reason}")
-    lines.append("")
-    lines.append("-" * 40)
-    lines.append("")
-    
-    return "\n".join(lines)
-
 # ==================== الدالة الرئيسية ====================
 def main():
     print("🚀 بدء تشغيل البوت...")
-    
-    send_telegram_message("✅ *البوت شغال وجاري التحليل...*")
     
     all_stocks = {
         "COMI.CA": "البنك التجاري الدولي",
@@ -307,59 +145,56 @@ def main():
     }
     
     results = []
-    successful = 0
     
     for ticker, name in all_stocks.items():
         print(f"🔍 تحليل: {name} ({ticker})")
         result = analyze_stock(ticker, name)
         if result:
             results.append(result)
-            successful += 1
             print(f"  ✅ تم تحليل {name}")
-        else:
-            print(f"  ❌ فشل تحليل {name}")
-        time.sleep(0.3)
-    
-    print(f"📊 تم تحليل {successful} من {len(all_stocks)} أسهم")
+        time.sleep(0.5)
     
     if results:
-        full_report = []
-        full_report.append("🌅 *التقرير الصباحي - البورصة المصرية*")
-        full_report.append(f"📅 {datetime.now(pytz.timezone('Africa/Cairo')).strftime('%Y-%m-%d %H:%M')}")
-        full_report.append("=" * 40)
-        full_report.append("")
+        # ====== تقرير كامل ======
+        lines = []
+        lines.append("🌅 *التقرير الصباحي - البورصة المصرية*")
+        lines.append(f"📅 {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+        lines.append("=" * 40)
+        lines.append("")
         
-        for result in results:
-            full_report.append(format_stock_report(result))
+        for r in results:
+            emoji = "🟢" if r['is_buy'] else "🔴" if r['is_sell'] else "⚪"
+            lines.append(f"{emoji} *{r['name']}* (`{r['ticker']}`)")
+            lines.append(f"  💰 السعر: {r['price']} جنيه")
+            lines.append(f"  📊 RSI: {r['rsi']} | CMF: {r['cmf']}")
+            lines.append(f"  📈 حجم: {r['volume_ratio']}x المتوسط")
+            lines.append(f"  🛡️ دعم: {r['support']} | 🚀 مقاومة: {r['resistance']}")
+            if r['is_buy']:
+                lines.append(f"  🎯 دخول: {r['entry_price']} | وقف: {r['stop_loss']} | هدف: {r['take_profit']}")
+                lines.append("  ✅ إشارة شراء")
+            elif r['is_sell']:
+                lines.append("  ⚠️ إشارة بيع")
+            lines.append("")
         
-        send_telegram_message("\n".join(full_report))
-        
+        lines.append("=" * 40)
         buy_signals = [r for r in results if r['is_buy']]
+        lines.append(f"📊 *ملخص:*")
+        lines.append(f"• إجمالي الأسهم: {len(results)}")
+        lines.append(f"• 🟢 إشارات شراء: {len(buy_signals)}")
+        lines.append(f"• 🔴 إشارات بيع: {len([r for r in results if r['is_sell']])}")
+        lines.append("")
+        lines.append("💡 *نصائح اليوم:*")
+        lines.append("• لا تدخل بدون وقف خسارة")
+        lines.append("• خذ ربح جزئي عند الهدف")
+        
+        send_telegram_message("\n".join(lines))
+        
+        # ====== تنبيهات الشراء ======
         if buy_signals:
-            summary = ["🔥 *إشارات شراء قوية:*"]
+            alert = "🔥 *تنبيه شراء فوري:*\n"
             for r in buy_signals[:5]:
-                summary.append(f"• {r['name']} - الدخول: {r['entry_price']} | الهدف: {r['take_profit_1']} | وقف: {r['stop_loss']}")
-            send_telegram_message("\n".join(summary))
-        else:
-            send_telegram_message("🟡 *لا توجد إشارات شراء قوية حالياً.*")
-        
-        buy_count = len([r for r in results if r['is_buy']])
-        sell_count = len([r for r in results if r['is_sell']])
-        
-        summary = f"""
-📊 *ملخص التحليل:*
-• إجمالي الأسهم: {len(results)}
-• إشارات شراء: {buy_count}
-• إشارات بيع: {sell_count}
-
-💡 *نصائح اليوم:*
-• لا تخاطر بأكثر من 2% من رأس المال في صفقة واحدة
-• التزم بوقف الخسارة المحدد
-• خذ ربح جزئي عند الهدف الأول
-"""
-        send_telegram_message(summary)
-    else:
-        send_telegram_message("❌ *فشل تحليل الأسهم. تأكد من اتصال الإنترنت.*")
+                alert += f"• {r['name']} - دخول: {r['entry_price']} | هدف: {r['take_profit']} | وقف: {r['stop_loss']}\n"
+            send_telegram_message(alert)
     
     print(f"🏁 انتهى التشغيل. عدد الأسهم المحللة: {len(results)}")
 
