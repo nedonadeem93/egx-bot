@@ -26,19 +26,17 @@ def send_telegram_message(message):
             payload = {"chat_id": TELEGRAM_CHAT_ID, "text": part, "parse_mode": "Markdown"}
             try:
                 requests.post(url, json=payload, timeout=10)
-                print(f"✅ تم إرسال جزء من الرسالة")
             except Exception as e:
                 print(f"❌ خطأ في الإرسال: {e}")
     else:
         url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
         payload = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown"}
         try:
-            response = requests.post(url, json=payload, timeout=10)
-            print(f"✅ تم إرسال الرسالة: {response.status_code}")
+            requests.post(url, json=payload, timeout=10)
         except Exception as e:
             print(f"❌ خطأ في الإرسال: {e}")
 
-# ==================== جلب البيانات من yfinance ====================
+# ==================== جلب البيانات ====================
 def get_stock_data(ticker, period="6mo"):
     try:
         stock = yf.Ticker(ticker)
@@ -52,28 +50,18 @@ def get_stock_data(ticker, period="6mo"):
         print(f"❌ خطأ في {ticker}: {e}")
         return None
 
-# ==================== حساب الدعم والمقاومة المتقدم ====================
-def calculate_support_resistance_advanced(df, lookback=50, window=5):
+# ==================== حساب الدعم والمقاومة ====================
+def calculate_support_resistance(df, lookback=50):
     high = df['High'].tail(lookback)
     low = df['Low'].tail(lookback)
     close = df['Close'].tail(lookback)
     current_price = close.iloc[-1]
     
-    peaks = []
-    troughs = []
+    # أقرب دعم ومقاومة
+    resistance = high.max()
+    support = low.min()
     
-    for i in range(window, len(high) - window):
-        if high.iloc[i] == high.iloc[i-window:i+window+1].max():
-            peaks.append(high.iloc[i])
-        if low.iloc[i] == low.iloc[i-window:i+window+1].min():
-            troughs.append(low.iloc[i])
-    
-    resistances = [p for p in peaks if p > current_price]
-    resistance = min(resistances) if resistances else high.max()
-    
-    supports = [t for t in troughs if t < current_price]
-    support = max(supports) if supports else low.min()
-    
+    # متوسط الدعم والمقاومة
     avg_resistance = high.mean()
     avg_support = low.mean()
     
@@ -93,10 +81,12 @@ def analyze_stock(ticker, name):
         if df is None or len(df) < 50:
             return None
         
+        # المؤشرات الفنية
         df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
         df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
         
+        # CMF
         mf_multiplier = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
         mf_volume = mf_multiplier * df['Volume']
         df['CMF'] = mf_volume.rolling(window=20).sum() / df['Volume'].rolling(window=20).sum()
@@ -108,13 +98,12 @@ def analyze_stock(ticker, name):
         
         last = df.iloc[-1]
         
-        sr = calculate_support_resistance_advanced(df)
+        sr = calculate_support_resistance(df)
         current_price = sr['current_price']
         support = sr['support']
         resistance = sr['resistance']
-        avg_support = sr['avg_support']
-        avg_resistance = sr['avg_resistance']
         
+        # ====== سعر الدخول ======
         if current_price < support * 1.02:
             entry_price = round(support * 1.01, 2)
             entry_strategy = "الشراء من الدعم"
@@ -125,32 +114,38 @@ def analyze_stock(ticker, name):
             entry_price = round(current_price * 1.005, 2)
             entry_strategy = "السعر الحالي + 0.5%"
         
-        stop_loss = round(support * 0.98, 2)
+        # ====== وقف الخسارة ======
+        stop_loss = round(support * 0.97, 2)
         
+        # ====== هدف الربح ======
         if resistance > current_price:
-            take_profit_1 = round(resistance, 2)
+            take_profit_1 = round(resistance * 0.995, 2)
         else:
             take_profit_1 = round(current_price * 1.05, 2)
         
-        take_profit_2 = round(take_profit_1 * 1.03, 2)
+        take_profit_2 = round(take_profit_1 * 1.02, 2)
         
+        # ====== نسبة المخاطرة/المكافأة ======
         risk = entry_price - stop_loss
         reward = take_profit_1 - entry_price
         risk_reward = round(reward / risk, 2) if risk > 0 else 0
         
-        # شروط الشراء
-        is_buy = all([
-            last['EMA_20'] > last['EMA_50'],
-            45 < last['RSI'] < 70,
-            last['CMF'] > 0,
-            last['Volume'] > last['Volume_MA'] * 0.7,
-            last['Close'] > last['EMA_50']
-        ])
+        # ====== شروط الشراء ======
+        buy_conditions = {
+            'ema_crossover': last['EMA_20'] > last['EMA_50'],
+            'rsi_ok': 45 < last['RSI'] < 70,
+            'cmf_ok': last['CMF'] > 0,
+            'volume_ok': last['Volume'] > last['Volume_MA'] * 0.7,
+            'above_ema50': last['Close'] > last['EMA_50'],
+            'near_support': current_price < support * 1.05
+        }
         
-        # شروط البيع
+        is_buy = all(buy_conditions.values())
+        
+        # ====== شروط البيع ======
         is_sell = (last['Close'] < support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
         
-        # التوصية
+        # ====== التوصية ======
         if is_buy:
             recommendation = "🔥 شراء فوري"
         elif is_sell:
@@ -159,6 +154,17 @@ def analyze_stock(ticker, name):
             recommendation = "🟡 مراقبة للشراء"
         else:
             recommendation = "⏳ انتظار"
+        
+        # ====== أسباب التوصية ======
+        reasons = []
+        if is_buy:
+            reasons.append(f"تقاطع EMA 20 فوق 50 ({round(last['EMA_20'], 2)} > {round(last['EMA_50'], 2)})")
+            reasons.append(f"RSI {round(last['RSI'], 1)} (زخم إيجابي)")
+            reasons.append(f"دعم عند {support}")
+            reasons.append(f"حجم التداول {round(last['Volume'] / last['Volume_MA'], 1)}x المتوسط")
+        elif is_sell:
+            reasons.append(f"كسر الدعم {support}" if last['Close'] < support else f"RSI {round(last['RSI'], 1)} (تشبع)")
+            reasons.append("CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50")
         
         return {
             'ticker': ticker,
@@ -174,8 +180,8 @@ def analyze_stock(ticker, name):
             'volume_ratio': round(last['Volume'] / last['Volume_MA'], 1),
             'support': support,
             'resistance': resistance,
-            'avg_support': avg_support,
-            'avg_resistance': avg_resistance,
+            'avg_support': sr['avg_support'],
+            'avg_resistance': sr['avg_resistance'],
             'entry_price': entry_price,
             'entry_strategy': entry_strategy,
             'stop_loss': stop_loss,
@@ -183,6 +189,7 @@ def analyze_stock(ticker, name):
             'take_profit_2': take_profit_2,
             'risk_reward': risk_reward,
             'recommendation': recommendation,
+            'reasons': reasons,
             'is_buy': is_buy,
             'is_sell': is_sell,
             'above_ema50': last['Close'] > last['EMA_50']
@@ -223,6 +230,10 @@ def format_stock_report(result):
     lines.append("")
     
     lines.append(f"📌 *التوصية:* {result['recommendation']}")
+    if result['reasons']:
+        lines.append("📝 *الأسباب:*")
+        for reason in result['reasons']:
+            lines.append(f"  ✅ {reason}")
     lines.append("")
     lines.append("-" * 40)
     lines.append("")
@@ -233,7 +244,6 @@ def format_stock_report(result):
 def main():
     print("🚀 بدء تشغيل البوت...")
     
-    # === رسالة تجريبية للتأكد من شغل التليجرام ===
     send_telegram_message("✅ *البوت شغال وجاري التحليل...*")
     
     all_stocks = {
@@ -268,11 +278,10 @@ def main():
         result = analyze_stock(ticker, name)
         if result:
             results.append(result)
-        time.sleep(0.5)
+        time.sleep(0.3)
     
-    # ====== إرسال التقرير ======
     if results:
-        # تقرير كامل
+        # التقرير الكامل
         full_report = []
         full_report.append("🌅 *التقرير الصباحي - البورصة المصرية*")
         full_report.append(f"📅 {datetime.now(pytz.timezone('Africa/Cairo')).strftime('%Y-%m-%d %H:%M')}")
@@ -284,7 +293,7 @@ def main():
         
         send_telegram_message("\n".join(full_report))
         
-        # ====== ملخص الإشارات القوية ======
+        # إشارات شراء
         buy_signals = [r for r in results if r['is_buy']]
         if buy_signals:
             summary = ["🔥 *إشارات شراء قوية:*"]
@@ -294,7 +303,7 @@ def main():
         else:
             send_telegram_message("🟡 *لا توجد إشارات شراء قوية حالياً.*")
         
-        # ====== ملخص التحليل ======
+        # ملخص
         buy_count = len([r for r in results if r['is_buy']])
         sell_count = len([r for r in results if r['is_sell']])
         
