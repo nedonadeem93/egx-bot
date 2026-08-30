@@ -1,11 +1,11 @@
 import pandas as pd
-import pandas_ta as ta
 import yfinance as yf
 import requests
 import os
 import json
 import time
 import pytz
+import ta
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -36,6 +36,14 @@ def send_telegram_message(message):
             requests.post(url, json=payload, timeout=10)
         except Exception as e:
             print(f"❌ خطأ في الإرسال: {e}")
+
+# ==================== حساب CMF يدوياً ====================
+def calculate_cmf(df, length=20):
+    """حساب مؤشر CMF (Chaikin Money Flow)"""
+    mf_multiplier = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
+    mf_volume = mf_multiplier * df['Volume']
+    cmf = mf_volume.rolling(window=length).sum() / df['Volume'].rolling(window=length).sum()
+    return cmf
 
 # ==================== الحصول على أعلى الأسهم سيولة ====================
 def get_top_liquid_stocks(limit=8):
@@ -119,7 +127,7 @@ def market_trend():
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        df['EMA_50'] = ta.ema(df['Close'], length=50)
+        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         last_close = df['Close'].iloc[-1]
         last_ema = df['EMA_50'].iloc[-1]
         
@@ -134,7 +142,7 @@ def market_trend():
     except:
         return "محايد 🟡"
 
-# ==================== حساب الدعم والمقاومة البسيط ====================
+# ==================== حساب الدعم والمقاومة ====================
 def calculate_support_resistance_simple(df, lookback=30):
     """حساب الدعم والمقاومة بطريقة بسيطة ودقيقة"""
     last = df.iloc[-1]
@@ -165,12 +173,12 @@ def analyze_stock(ticker, name):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        # ====== المؤشرات الفنية ======
-        df['EMA_20'] = ta.ema(df['Close'], length=20)
-        df['EMA_50'] = ta.ema(df['Close'], length=50)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['CMF'] = ta.cmf(df['High'], df['Low'], df['Close'], df['Volume'], length=20)
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        # ====== المؤشرات الفنية باستخدام مكتبة ta ======
+        df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
+        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
+        df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
+        df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
+        df['CMF'] = calculate_cmf(df, length=20)
         df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
         df['Price_Change_1d'] = df['Close'].pct_change() * 100
         df['Price_Change_5d'] = df['Close'].pct_change(periods=5) * 100
@@ -185,19 +193,17 @@ def analyze_stock(ticker, name):
         resistance = sr['resistance']
         
         # ====== سعر الدخول المثالي ======
-        # استخدام السعر الحالي + 0.5% (دخول واقعي)
         entry_price = round(current_price * 1.005, 2)
         entry_strategy = "السعر الحالي + 0.5%"
         
         # ====== وقف الخسارة ======
-        # 3% تحت الدعم
         stop_loss = round(support * 0.97, 2)
         
         # ====== هدف الربح ======
         if resistance > current_price:
             take_profit_1 = round(resistance * 0.995, 2)
         else:
-            take_profit_1 = round(current_price * 1.05, 2)  # 5% ربح
+            take_profit_1 = round(current_price * 1.05, 2)
         
         take_profit_2 = round(take_profit_1 * 1.02, 2)
         
@@ -430,7 +436,7 @@ def is_duplicate_run():
             with open(lock_file, 'r') as f:
                 data = json.load(f)
                 last_run = datetime.fromisoformat(data['last_run'])
-                if (datetime.now() - last_run).seconds < 300:  # 5 دقائق
+                if (datetime.now() - last_run).seconds < 300:
                     return True
         except:
             pass
@@ -446,20 +452,16 @@ def save_run_time():
 def main():
     print("🚀 بدء تشغيل النظام المتكامل...")
     
-    # منع التكرار
     if is_duplicate_run():
         print("⏳ تم التشغيل مؤخراً، تخطي...")
         return
     
-    # ====== المرحلة 1: حساب السيولة ======
     top_liquid = get_top_liquid_stocks(limit=8)
     print(f"✅ تم اختيار {len(top_liquid)} سهم عالي السيولة")
     
-    # ====== المرحلة 2: تحليل السوق العام ======
     trend = market_trend()
     print(f"🌍 اتجاه السوق: {trend}")
     
-    # ====== المرحلة 3: تحليل الأسهم ======
     all_stocks = {
         "COMI.CA": "البنك التجاري الدولي",
         "TMGH.CA": "طلعت مصطفى",
@@ -507,16 +509,13 @@ def main():
             
             time.sleep(0.5)
     
-    # ====== المرحلة 4: التقرير الصباحي ======
     report = morning_report(top_liquid, all_results, trend)
     send_telegram_message(report)
     print("✅ تم إرسال التقرير الصباحي")
     
-    # ====== المرحلة 5: ملخص ======
     buy_count = len([r for r in all_results if r and r['is_buy']])
     sell_count = len([r for r in all_results if r and r['is_sell']])
     
-    # توقيت مصر
     egypt_tz = pytz.timezone('Africa/Cairo')
     now = datetime.now(egypt_tz)
     
@@ -533,7 +532,6 @@ def main():
     send_telegram_message(summary)
     print("✅ تم إرسال الملخص")
     
-    # حفظ وقت التشغيل
     save_run_time()
     
     print(f"🏁 انتهى التشغيل. الإشارات: شراء {buy_count} | بيع {sell_count} | تنبيهات {alerts_sent}")
