@@ -8,15 +8,23 @@ import pytz
 import ta
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from alpha_vantage.timeseries import TimeSeries
+from alpha_vantage.techindicators import TechIndicators
 
 load_dotenv()
+
+# ==================== إعدادات Alpha Vantage ====================
+ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY')
+
+if not ALPHA_VANTAGE_KEY:
+    raise ValueError("❌ لازم تحط ALPHA_VANTAGE_KEY في ملف .env")
 
 # ==================== إعدادات التليجرام ====================
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise ValueError("❌ يجب تعيين TELEGRAM_TOKEN و TELEGRAM_CHAT_ID")
+    raise ValueError("❌ لازم تحط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID")
 
 def send_telegram_message(message):
     """إرسال رسالة مع تقسيمها إذا كانت طويلة"""
@@ -36,6 +44,35 @@ def send_telegram_message(message):
             requests.post(url, json=payload, timeout=10)
         except Exception as e:
             print(f"❌ خطأ في الإرسال: {e}")
+
+# ==================== جلب البيانات من Alpha Vantage ====================
+def get_stock_data_alpha(ticker, outputsize='compact'):
+    """
+    جلب بيانات السهم من Alpha Vantage
+    outputsize: 'compact' = 100 يوم (مجاني), 'full' = كل البيانات (مميز)
+    """
+    try:
+        ts = TimeSeries(key=ALPHA_VANTAGE_KEY, output_format='pandas')
+        
+        # تحويل التicker لصيغة Alpha Vantage
+        symbol = ticker.replace('.CA', '.EGY')  # مثال: COMI.CA → COMI.EGY
+        
+        data, meta_data = ts.get_daily(symbol=symbol, outputsize=outputsize)
+        
+        if data.empty:
+            print(f"⚠️ مفيش بيانات لـ {ticker} من Alpha Vantage")
+            return None
+        
+        # إعادة تسمية الأعمدة
+        data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
+        data = data.astype(float)
+        data = data.sort_index()  # ترتيب تصاعدي (الأقدم أولاً)
+        
+        return data
+        
+    except Exception as e:
+        print(f"❌ Alpha Vantage خطأ في {ticker}: {e}")
+        return None
 
 # ==================== حساب CMF يدوياً ====================
 def calculate_cmf(df, length=20):
@@ -82,24 +119,19 @@ def get_top_liquid_stocks(limit=8):
     
     for ticker, name in all_stocks.items():
         try:
-            stock = yf.Ticker(ticker)
-            df = stock.history(period="5d", interval="1d", progress=False)
+            df = get_stock_data_alpha(ticker, 'compact')
             
-            if df.empty:
+            if df is None or df.empty:
                 continue
             
-            if isinstance(df.columns, pd.MultiIndex):
-                df.columns = df.columns.get_level_values(0)
+            last_day = df.iloc[-1]
+            volume = last_day['Volume']
+            price = last_day['Close']
             
-            if 'Volume' in df.columns and 'Close' in df.columns:
-                last_day = df.iloc[-1]
-                volume = last_day['Volume']
-                price = last_day['Close']
-                
-                if volume > 0 and price > 0:
-                    value = volume * price
-                    stock_volumes.append((ticker, name, value))
-                    print(f"  ✅ {name}: {value:,.0f} جنيه")
+            if volume > 0 and price > 0:
+                value = volume * price
+                stock_volumes.append((ticker, name, value))
+                print(f"  ✅ {name}: {value:,.0f} جنيه")
                 
         except Exception as e:
             print(f"  ❌ فشل {ticker}: {str(e)[:50]}")
@@ -120,12 +152,9 @@ def get_top_liquid_stocks(limit=8):
 def market_trend():
     """تحديد اتجاه السوق العام"""
     try:
-        df = yf.download("^EGX30", period="3mo", interval="1d", progress=False)
-        if df.empty:
+        df = get_stock_data_alpha('EGX30', 'compact')
+        if df is None or df.empty:
             return "محايد 🟡"
-        
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
         
         df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         last_close = df['Close'].iloc[-1]
@@ -164,16 +193,12 @@ def calculate_support_resistance_simple(df, lookback=30):
 def analyze_stock(ticker, name):
     """تحليل سهم واحد مع دعم ومقاومة"""
     try:
-        stock = yf.Ticker(ticker)
-        df = stock.history(period="6mo", interval="1d")
+        df = get_stock_data_alpha(ticker, 'compact')
         
-        if df.empty or len(df) < 50:
+        if df is None or df.empty or len(df) < 50:
             return None
         
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-        
-        # ====== المؤشرات الفنية باستخدام مكتبة ta ======
+        # ====== المؤشرات الفنية ======
         df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
         df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
@@ -249,11 +274,6 @@ def analyze_stock(ticker, name):
                 "CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50"
             ]
         
-        # ====== المعلومات الأساسية ======
-        info = stock.info
-        eps = info.get('trailingEps', 'غير متاح')
-        pe = info.get('trailingPE', 'غير متاح')
-        
         return {
             'ticker': ticker,
             'name': name,
@@ -278,8 +298,6 @@ def analyze_stock(ticker, name):
             'signal': signal,
             'signal_type': signal_type,
             'reasons': reasons,
-            'eps': eps,
-            'pe': pe,
             'is_buy': is_buy,
             'is_sell': is_sell,
             'above_ema50': last['Close'] > last['EMA_50']
@@ -294,7 +312,6 @@ def morning_report(top_liquid, all_results, trend):
     """توليد التقرير الصباحي المحسن"""
     lines = []
     
-    # توقيت مصر
     egypt_tz = pytz.timezone('Africa/Cairo')
     now = datetime.now(egypt_tz)
     
@@ -315,7 +332,7 @@ def morning_report(top_liquid, all_results, trend):
                 lines.append(f"   💰 السعر: {stock_result['price']} جنيه")
                 lines.append(f"   📊 RSI: {stock_result['rsi']} | CMF: {stock_result['cmf']}")
                 lines.append(f"   📈 حجم: {stock_result['volume_ratio']}x المتوسط")
-                lines.append(f"   📉 دعم: {stock_result['support']} | مقاومة: {stock_result['resistance']}")
+                lines.append(f"   🛡️ دعم: {stock_result['support']} | 🚀 مقاومة: {stock_result['resistance']}")
             else:
                 lines.append(f"{i}. {name} (`{ticker}`)")
         lines.append("")
@@ -342,6 +359,7 @@ def morning_report(top_liquid, all_results, trend):
             lines.append(f"  📈 حجم التداول: {r['volume_ratio']}x المتوسط")
             lines.append(f"  📈 الأداء 20 يوم: {r['change_20d']}%")
             lines.append(f"  🎯 الدخول: {r['entry_price']} | وقف: {r['stop_loss']} | هدف: {r['take_profit_1']}")
+            lines.append(f"  🛡️ دعم: {r['support']} | 🚀 مقاومة: {r['resistance']}")
             if r['reasons']:
                 lines.append(f"  ✅ {r['reasons'][0]}")
         lines.append("")
@@ -408,8 +426,8 @@ def alert_message(r):
         f"🏆 الهدف الثاني: {r['take_profit_2']} جنيه",
         f"📊 نسبة المخاطرة/المكافأة: 1:{r['risk_reward']}",
         "----------------------------------",
-        f"📉 أقرب دعم: {r['support']} جنيه",
-        f"📈 أقرب مقاومة: {r['resistance']} جنيه",
+        f"🛡️ أقرب دعم: {r['support']} جنيه",
+        f"🚀 أقرب مقاومة: {r['resistance']} جنيه",
         f"📊 RSI: {r['rsi']} | CMF: {r['cmf']}",
         f"📈 حجم التداول: {r['volume_ratio']}x المتوسط",
     ]
@@ -419,7 +437,6 @@ def alert_message(r):
         for reason in r['reasons'][:4]:
             lines.append(f"  ✅ {reason}")
     
-    # توقيت مصر
     egypt_tz = pytz.timezone('Africa/Cairo')
     now = datetime.now(egypt_tz)
     lines.append("")
@@ -429,7 +446,6 @@ def alert_message(r):
 
 # ==================== منع التكرار ====================
 def is_duplicate_run():
-    """التحقق من عدم تكرار التشغيل خلال 5 دقائق"""
     lock_file = "last_run.json"
     if os.path.exists(lock_file):
         try:
@@ -443,7 +459,6 @@ def is_duplicate_run():
     return False
 
 def save_run_time():
-    """حفظ وقت التشغيل الحالي"""
     lock_file = "last_run.json"
     with open(lock_file, 'w') as f:
         json.dump({'last_run': datetime.now().isoformat()}, f)
