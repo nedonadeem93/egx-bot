@@ -1,10 +1,10 @@
 import pandas as pd
-import pandas_ta as ta
 import yfinance as yf
 import requests
 import os
 from datetime import datetime
 import time
+import ta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -24,9 +24,15 @@ def send_telegram_message(message):
     except Exception as e:
         print(f"❌ خطأ في الإرسال: {e}")
 
+# ==================== حساب CMF يدوياً ====================
+def calculate_cmf(df, length=20):
+    mf_multiplier = ((df['Close'] - df['Low']) - (df['High'] - df['Close'])) / (df['High'] - df['Low'])
+    mf_volume = mf_multiplier * df['Volume']
+    cmf = mf_volume.rolling(window=length).sum() / df['Volume'].rolling(window=length).sum()
+    return cmf
+
 # ==================== تحليل السوق العام ====================
 def market_trend():
-    """تحديد اتجاه السوق العام"""
     try:
         df = yf.download("^EGX30", period="3mo", interval="1d", progress=False)
         if df.empty:
@@ -35,18 +41,14 @@ def market_trend():
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        df['EMA_50'] = ta.ema(df['Close'], length=50)
+        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
         last_close = df['Close'].iloc[-1]
         last_ema = df['EMA_50'].iloc[-1]
         
-        performance = ((df['Close'].iloc[-1] / df['Close'].iloc[-20]) - 1) * 100
-        
-        if last_close > last_ema and performance > 0:
+        if last_close > last_ema:
             return "صاعد 🟢"
-        elif last_close < last_ema and performance < 0:
-            return "هابط 🔴"
         else:
-            return "محايد 🟡"
+            return "هابط 🔴"
     except:
         return "محايد 🟡"
 
@@ -62,36 +64,37 @@ def analyze_stock(ticker, name):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
         
-        # المؤشرات الفنية
-        df['EMA_20'] = ta.ema(df['Close'], length=20)
-        df['EMA_50'] = ta.ema(df['Close'], length=50)
-        df['RSI'] = ta.rsi(df['Close'], length=14)
-        df['CMF'] = ta.cmf(df['High'], df['Low'], df['Close'], df['Volume'], length=20)
-        df['ATR'] = ta.atr(df['High'], df['Low'], df['Close'], length=14)
+        # ====== المؤشرات الفنية ======
+        df['EMA_20'] = ta.trend.ema_indicator(df['Close'], window=20)
+        df['EMA_50'] = ta.trend.ema_indicator(df['Close'], window=50)
+        df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
+        df['ATR'] = ta.volatility.average_true_range(df['High'], df['Low'], df['Close'], window=14)
+        df['CMF'] = calculate_cmf(df, length=20)
+        df['Volume_MA'] = df['Volume'].rolling(window=20).mean()
         
         last = df.iloc[-1]
         
-        # حساب الدعم والمقاومة
-        high = df['High'].tail(30)
-        low = df['Low'].tail(30)
-        resistance = high.max()
-        support = low.min()
+        # ====== الدعم والمقاومة ======
+        high_30 = df['High'].tail(30)
+        low_30 = df['Low'].tail(30)
+        resistance = high_30.max()
+        support = low_30.min()
         
-        # سعر الدخول
+        # ====== سعر الدخول ======
         entry_price = round(last['Close'] * 1.005, 2)
         stop_loss = round(support * 0.97, 2)
         take_profit = round(resistance * 0.995 if resistance > last['Close'] else last['Close'] * 1.05, 2)
         
-        # شروط الشراء
+        # ====== شروط الشراء ======
         is_buy = all([
             last['EMA_20'] > last['EMA_50'],
             45 < last['RSI'] < 70,
             last['CMF'] > 0,
-            last['Volume'] > df['Volume'].rolling(20).mean().iloc[-1] * 0.7,
+            last['Volume'] > last['Volume_MA'] * 0.7,
             last['Close'] > last['EMA_50']
         ])
         
-        # شروط البيع
+        # ====== شروط البيع ======
         is_sell = (last['Close'] < support or last['RSI'] > 75) and last['RSI'] > 60
         
         return {
@@ -100,7 +103,7 @@ def analyze_stock(ticker, name):
             'price': round(last['Close'], 2),
             'rsi': round(last['RSI'], 1),
             'cmf': round(last['CMF'], 3),
-            'volume_ratio': round(last['Volume'] / df['Volume'].rolling(20).mean().iloc[-1], 1),
+            'volume_ratio': round(last['Volume'] / last['Volume_MA'], 1),
             'support': round(support, 2),
             'resistance': round(resistance, 2),
             'entry_price': entry_price,
@@ -118,6 +121,8 @@ def analyze_stock(ticker, name):
 # ==================== الدالة الرئيسية ====================
 def main():
     print("🚀 بدء تشغيل البوت...")
+    
+    send_telegram_message("✅ *البوت شغال وجاري التحليل...*")
     
     all_stocks = {
         "COMI.CA": "البنك التجاري الدولي",
