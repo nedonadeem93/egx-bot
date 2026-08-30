@@ -17,14 +17,14 @@ load_dotenv()
 ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY')
 
 if not ALPHA_VANTAGE_KEY:
-    raise ValueError("❌ لازم تحط ALPHA_VANTAGE_KEY في ملف .env")
+    raise ValueError("❌ لازم تحط ALPHA_VANTAGE_KEY في Secrets GitHub")
 
 # ==================== إعدادات التليجرام ====================
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
 if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-    raise ValueError("❌ لازم تحط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID")
+    raise ValueError("❌ لازم تحط TELEGRAM_TOKEN و TELEGRAM_CHAT_ID في Secrets GitHub")
 
 def send_telegram_message(message):
     """إرسال رسالة مع تقسيمها إذا كانت طويلة"""
@@ -152,7 +152,7 @@ def get_top_liquid_stocks(limit=8):
 def market_trend():
     """تحديد اتجاه السوق العام"""
     try:
-        df = get_stock_data_alpha('EGX30', 'compact')
+        df = get_stock_data_alpha('^EGX30', 'compact')
         if df is None or df.empty:
             return "محايد 🟡"
         
