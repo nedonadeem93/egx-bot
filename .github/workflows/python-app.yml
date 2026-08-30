@@ -2,8 +2,8 @@ name: EGX Trading Scanner
 
 on:
   schedule:
-    - cron: '30 8 * * 1-5'  # 8:30 صباحاً أيام الأسبوع
-  workflow_dispatch:  # للتشغيل اليدوي
+    - cron: '30 6 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   scan:
@@ -17,6 +17,11 @@ jobs:
         with:
           python-version: '3.12'
       
+      - name: Set timezone to Cairo
+        run: |
+          sudo timedatectl set-timezone Africa/Cairo
+          date
+      
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -26,4 +31,5 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          TZ: Africa/Cairo
         run: python bot.py
