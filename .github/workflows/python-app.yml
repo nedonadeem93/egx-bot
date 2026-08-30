@@ -1,18 +1,16 @@
-# ==================== .github/workflows/scan.yml ====================
 name: EGX Trading Scanner
 
 on:
   schedule:
-    - cron: '30 6 * * 1-5'  # 8:30 صباحاً بتوقيت مصر (6:30 UTC)
-  workflow_dispatch:  # للتشغيل اليدوي
+    - cron: '30 6 * * 1-5'
+  workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v3
       
       - name: Setup Python
         uses: actions/setup-python@v4
