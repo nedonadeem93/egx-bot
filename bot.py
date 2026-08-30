@@ -8,16 +8,8 @@ import pytz
 import ta
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
-from alpha_vantage.timeseries import TimeSeries
-from alpha_vantage.techindicators import TechIndicators
 
 load_dotenv()
-
-# ==================== إعدادات Alpha Vantage ====================
-ALPHA_VANTAGE_KEY = os.getenv('ALPHA_VANTAGE_KEY')
-
-if not ALPHA_VANTAGE_KEY:
-    raise ValueError("❌ لازم تحط ALPHA_VANTAGE_KEY في Secrets GitHub")
 
 # ==================== إعدادات التليجرام ====================
 TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -45,33 +37,24 @@ def send_telegram_message(message):
         except Exception as e:
             print(f"❌ خطأ في الإرسال: {e}")
 
-# ==================== جلب البيانات من Alpha Vantage ====================
-def get_stock_data_alpha(ticker, outputsize='compact'):
-    """
-    جلب بيانات السهم من Alpha Vantage
-    outputsize: 'compact' = 100 يوم (مجاني), 'full' = كل البيانات (مميز)
-    """
+# ==================== جلب البيانات من yfinance ====================
+def get_stock_data_yfinance(ticker, period="6mo"):
+    """جلب بيانات السهم من yfinance"""
     try:
-        ts = TimeSeries(key=ALPHA_VANTAGE_KEY, output_format='pandas')
+        stock = yf.Ticker(ticker)
+        df = stock.history(period=period, interval="1d", progress=False)
         
-        # تحويل التicker لصيغة Alpha Vantage
-        symbol = ticker.replace('.CA', '.EGY')  # مثال: COMI.CA → COMI.EGY
-        
-        data, meta_data = ts.get_daily(symbol=symbol, outputsize=outputsize)
-        
-        if data.empty:
-            print(f"⚠️ مفيش بيانات لـ {ticker} من Alpha Vantage")
+        if df.empty:
+            print(f"⚠️ مفيش بيانات لـ {ticker}")
             return None
         
-        # إعادة تسمية الأعمدة
-        data.columns = ['Open', 'High', 'Low', 'Close', 'Volume']
-        data = data.astype(float)
-        data = data.sort_index()  # ترتيب تصاعدي (الأقدم أولاً)
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
         
-        return data
+        return df
         
     except Exception as e:
-        print(f"❌ Alpha Vantage خطأ في {ticker}: {e}")
+        print(f"❌ yfinance خطأ في {ticker}: {e}")
         return None
 
 # ==================== حساب CMF يدوياً ====================
@@ -119,7 +102,7 @@ def get_top_liquid_stocks(limit=8):
     
     for ticker, name in all_stocks.items():
         try:
-            df = get_stock_data_alpha(ticker, 'compact')
+            df = get_stock_data_yfinance(ticker, period="5d")
             
             if df is None or df.empty:
                 continue
@@ -137,7 +120,7 @@ def get_top_liquid_stocks(limit=8):
             print(f"  ❌ فشل {ticker}: {str(e)[:50]}")
             continue
         
-        time.sleep(0.5)
+        time.sleep(0.3)
     
     stock_volumes.sort(key=lambda x: x[2], reverse=True)
     
@@ -152,7 +135,7 @@ def get_top_liquid_stocks(limit=8):
 def market_trend():
     """تحديد اتجاه السوق العام"""
     try:
-        df = get_stock_data_alpha('^EGX30', 'compact')
+        df = get_stock_data_yfinance("^EGX30", period="3mo")
         if df is None or df.empty:
             return "محايد 🟡"
         
@@ -171,29 +154,50 @@ def market_trend():
     except:
         return "محايد 🟡"
 
-# ==================== حساب الدعم والمقاومة ====================
-def calculate_support_resistance_simple(df, lookback=30):
-    """حساب الدعم والمقاومة بطريقة بسيطة ودقيقة"""
+# ==================== حساب الدعم والمقاومة المحسن ====================
+def calculate_support_resistance_enhanced(df, lookback=30):
+    """حساب الدعم والمقاومة بطريقة محسنة"""
     last = df.iloc[-1]
     current_price = last['Close']
     
+    # أعلى وأدنى 30 يوم
     high_30 = df['High'].tail(lookback)
     low_30 = df['Low'].tail(lookback)
     
     resistance = high_30.max()
     support = low_30.min()
     
+    # حساب القمم والقيعان المحلية (أدق)
+    peaks = []
+    troughs = []
+    
+    for i in range(5, len(high_30) - 5):
+        if high_30.iloc[i] == high_30.iloc[i-5:i+6].max():
+            peaks.append(high_30.iloc[i])
+        if low_30.iloc[i] == low_30.iloc[i-5:i+6].min():
+            troughs.append(low_30.iloc[i])
+    
+    # أقرب مقاومة فوق السعر
+    resistances_above = [p for p in peaks if p > current_price]
+    closest_resistance = min(resistances_above) if resistances_above else resistance
+    
+    # أقرب دعم تحت السعر
+    supports_below = [t for t in troughs if t < current_price]
+    closest_support = max(supports_below) if supports_below else support
+    
     return {
-        'support': round(support, 2),
-        'resistance': round(resistance, 2),
+        'support': round(closest_support, 2),
+        'resistance': round(closest_resistance, 2),
+        'main_support': round(support, 2),
+        'main_resistance': round(resistance, 2),
         'current_price': round(current_price, 2)
     }
 
 # ==================== تحليل السهم ====================
 def analyze_stock(ticker, name):
-    """تحليل سهم واحد مع دعم ومقاومة"""
+    """تحليل سهم واحد مع دعم ومقاومة محسنة"""
     try:
-        df = get_stock_data_alpha(ticker, 'compact')
+        df = get_stock_data_yfinance(ticker, period="6mo")
         
         if df is None or df.empty or len(df) < 50:
             return None
@@ -211,22 +215,31 @@ def analyze_stock(ticker, name):
         
         last = df.iloc[-1]
         
-        # ====== حساب الدعم والمقاومة ======
-        sr = calculate_support_resistance_simple(df)
+        # ====== حساب الدعم والمقاومة المحسن ======
+        sr = calculate_support_resistance_enhanced(df)
         current_price = sr['current_price']
         support = sr['support']
         resistance = sr['resistance']
+        main_support = sr['main_support']
+        main_resistance = sr['main_resistance']
         
         # ====== سعر الدخول المثالي ======
-        entry_price = round(current_price * 1.005, 2)
-        entry_strategy = "السعر الحالي + 0.5%"
+        if current_price < support * 1.02:
+            entry_price = round(support * 1.01, 2)
+            entry_strategy = "الارتداد من الدعم"
+        elif current_price > resistance * 0.98:
+            entry_price = round(resistance * 1.005, 2)
+            entry_strategy = "اختراق المقاومة"
+        else:
+            entry_price = round(current_price * 1.005, 2)
+            entry_strategy = "السعر الحالي + 0.5%"
         
         # ====== وقف الخسارة ======
-        stop_loss = round(support * 0.97, 2)
+        stop_loss = round(main_support * 0.97, 2)
         
         # ====== هدف الربح ======
-        if resistance > current_price:
-            take_profit_1 = round(resistance * 0.995, 2)
+        if main_resistance > current_price:
+            take_profit_1 = round(main_resistance * 0.995, 2)
         else:
             take_profit_1 = round(current_price * 1.05, 2)
         
@@ -250,7 +263,7 @@ def analyze_stock(ticker, name):
         is_buy = all(buy_conditions.values())
         
         # ====== شروط الخروج (بيع) ======
-        is_sell = (last['Close'] < support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
+        is_sell = (last['Close'] < main_support or last['RSI'] > 75 or last['CMF'] < -0.1) and last['RSI'] > 60
         
         # ====== تحديد الإشارة ======
         signal = "انتظار ⏳"
@@ -270,7 +283,7 @@ def analyze_stock(ticker, name):
             signal = "⚠️ بيع/خروج"
             signal_type = "sell"
             reasons = [
-                f"كسر الدعم {support}" if last['Close'] < support else f"RSI {round(last['RSI'], 1)} (تشبع)",
+                f"كسر الدعم {main_support}" if last['Close'] < main_support else f"RSI {round(last['RSI'], 1)} (تشبع)",
                 "CMF سالب (سيولة خارجة)" if last['CMF'] < -0.1 else "تحت المتوسط 50"
             ]
         
@@ -289,6 +302,8 @@ def analyze_stock(ticker, name):
             'change_20d': round(last['Price_Change_20d'], 2),
             'support': support,
             'resistance': resistance,
+            'main_support': main_support,
+            'main_resistance': main_resistance,
             'entry_price': entry_price,
             'entry_strategy': entry_strategy,
             'stop_loss': stop_loss,
@@ -332,7 +347,8 @@ def morning_report(top_liquid, all_results, trend):
                 lines.append(f"   💰 السعر: {stock_result['price']} جنيه")
                 lines.append(f"   📊 RSI: {stock_result['rsi']} | CMF: {stock_result['cmf']}")
                 lines.append(f"   📈 حجم: {stock_result['volume_ratio']}x المتوسط")
-                lines.append(f"   🛡️ دعم: {stock_result['support']} | 🚀 مقاومة: {stock_result['resistance']}")
+                lines.append(f"   🛡️ دعم قريب: {stock_result['support']} | 🚀 مقاومة قريبة: {stock_result['resistance']}")
+                lines.append(f"   🛡️ الدعم الرئيسي: {stock_result['main_support']} | 🚀 المقاومة الرئيسية: {stock_result['main_resistance']}")
             else:
                 lines.append(f"{i}. {name} (`{ticker}`)")
         lines.append("")
@@ -522,7 +538,7 @@ def main():
                     alerts_sent += 1
                     print(f"✅ تم إرسال تنبيه لـ {name}")
             
-            time.sleep(0.5)
+            time.sleep(0.3)
     
     report = morning_report(top_liquid, all_results, trend)
     send_telegram_message(report)
